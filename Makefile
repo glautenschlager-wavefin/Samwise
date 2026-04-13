@@ -1,4 +1,4 @@
-.PHONY: help install format lint lint-fix type-check test all-checks clean
+.PHONY: help install format lint lint-fix type-check test all-checks clean ext-install ext-build ext-watch
 
 help:
 	@echo "Samwise Development Commands"
@@ -11,6 +11,12 @@ help:
 	@echo "make test            Run tests (pytest)"
 	@echo "make all-checks      Run all checks (format, lint, type-check, test)"
 	@echo "make clean           Remove cache and temporary files"
+	@echo ""
+	@echo "Extension Commands"
+	@echo "=================="
+	@echo "make ext-install     Install extension dependencies"
+	@echo "make ext-build       Build extension"
+	@echo "make ext-watch       Watch extension for changes"
 
 install:
 	poetry install
@@ -41,5 +47,15 @@ clean:
 	find . -type d -name ".mypy_cache" -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name ".ruff_cache" -exec rm -rf {} + 2>/dev/null || true
 	rm -rf build dist
+
+# --- Extension (VS Code) ---
+ext-install:
+	cd extension && npm install
+
+ext-build:
+	cd extension && npm run compile
+
+ext-watch:
+	cd extension && npm run watch
 
 .DEFAULT_GOAL := help

@@ -1,0 +1,101 @@
+{
+  "name": "samwise-vscode",
+  "displayName": "Samwise",
+  "description": "Your faithful coding assistant, from green fields to Mount Doom",
+  "version": "0.1.0",
+  "publisher": "wave",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "samwise-sidebar",
+          "title": "Samwise",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "samwise-sidebar": [
+        {
+          "type": "webview",
+          "id": "samwise.activityFeed",
+          "name": "Activity Feed"
+        }
+      ]
+    },
+    "chatParticipants": [
+      {
+        "id": "samwise.chat",
+        "name": "samwise",
+        "fullName": "Samwise",
+        "description": "Your faithful coding assistant",
+        "isSticky": true,
+        "commands": [
+          {
+            "name": "sprint",
+            "description": "Show sprint board summary"
+          },
+          {
+            "name": "status",
+            "description": "Show current activity status"
+          },
+          {
+            "name": "break",
+            "description": "Toggle break reminder"
+          },
+          {
+            "name": "help",
+            "description": "List available commands"
+          }
+        ]
+      }
+    ],
+    "commands": [
+      {
+        "command": "samwise.openPanel",
+        "title": "Samwise: Open Activity Feed"
+      },
+      {
+        "command": "samwise.refreshFeed",
+        "title": "Samwise: Refresh Activity Feed",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "samwise.showSummary",
+        "title": "Samwise: Show Today's Summary"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "samwise.refreshFeed",
+          "when": "view == samwise.activityFeed",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "lint": "eslint src/",
+    "vscode:prepublish": "node esbuild.mjs --production"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.90.0",
+    "esbuild": "^0.21.0",
+    "typescript": "^5.5.0"
+  }
+}
