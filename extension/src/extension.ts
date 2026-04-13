@@ -72,6 +72,24 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Also try to connect immediately
   void updateStatusBar();
+
+  // --- SSE: real-time notifications from the backend ---
+  client.subscribeEvents((item) => {
+    // Refresh sidebar whenever something new arrives
+    void sidebarProvider.refresh();
+    void updateStatusBar();
+
+    // Show a VS Code notification for high-urgency items
+    if (item.urgency === "high") {
+      void vscode.window
+        .showWarningMessage(`Samwise: ${item.title}`, "Open Feed")
+        .then((choice) => {
+          if (choice === "Open Feed") {
+            void vscode.commands.executeCommand("samwise.activityFeed.focus");
+          }
+        });
+    }
+  });
 }
 
 export function deactivate(): void {

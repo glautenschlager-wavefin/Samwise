@@ -84,6 +84,7 @@ class GitHubSensor(Sensor):
                         title=f"PR #{pr_number} approved",
                         detail=f"{repo_full}: {title} — ready to merge",
                         timestamp=updated,
+                        metadata={"repo": repo_full, "pr_number": str(pr_number)},
                     )
                 )
             elif has_comments:
@@ -95,6 +96,7 @@ class GitHubSensor(Sensor):
                         title=f"PR #{pr_number} needs changes",
                         detail=f"{repo_full}: {title} — changes requested",
                         timestamp=updated,
+                        metadata={"repo": repo_full, "pr_number": str(pr_number)},
                     )
                 )
             else:
@@ -106,6 +108,7 @@ class GitHubSensor(Sensor):
                         title=f"PR #{pr_number} open",
                         detail=f"{repo_full}: {title}",
                         timestamp=updated,
+                        metadata={"repo": repo_full, "pr_number": str(pr_number)},
                     )
                 )
 
@@ -120,6 +123,7 @@ class GitHubSensor(Sensor):
                         title=f"CI failing on PR #{pr_number}",
                         detail=f"{repo_full}: {title}",
                         timestamp=updated,
+                        metadata={"repo": repo_full, "pr_number": str(pr_number)},
                     )
                 )
 

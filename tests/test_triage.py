@@ -30,6 +30,7 @@ def test_pr_approved_becomes_high_urgency() -> None:
     item = _make_item(title="PR #85 approved", icon="👀")
     [result] = triage([item])
     assert result.urgency == Urgency.HIGH
+    assert result.disposition == Disposition.ACT
 
 
 def test_open_pr_no_action_is_deferred() -> None:

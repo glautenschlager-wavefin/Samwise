@@ -34,6 +34,7 @@ class ActivityItem(BaseModel):
     timestamp: datetime
     urgency: Urgency = Urgency.NORMAL
     disposition: Disposition = Disposition.NOTIFY
+    metadata: dict[str, str] = {}
 
 
 class StatusSummary(BaseModel):

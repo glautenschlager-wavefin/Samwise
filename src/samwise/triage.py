@@ -46,9 +46,9 @@ def _ci_failure_is_high_urgency(item: ActivityItem) -> ActivityItem:
 
 
 def _pr_approved_is_high(item: ActivityItem) -> ActivityItem:
-    """An approved PR is a merge opportunity — don't let it go stale."""
+    """An approved PR is a merge opportunity — route to act handler."""
     if "approved" in item.title.lower():
-        return item.model_copy(update={"urgency": Urgency.HIGH})
+        return item.model_copy(update={"urgency": Urgency.HIGH, "disposition": Disposition.ACT})
     return item
 
 

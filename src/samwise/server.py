@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import StreamingResponse
 
 from samwise.config import Settings
 from samwise.dispatch import Dispatcher
+from samwise.handlers.act import ActHandler
+from samwise.handlers.defer import DeferHandler
+from samwise.handlers.notify import NotifyHandler
 from samwise.models import ActivityItem, Disposition, HealthResponse, StatusSummary
 from samwise.pipeline import Pipeline
 from samwise.sensors.github import GitHubSensor
@@ -17,44 +22,29 @@ logger = logging.getLogger(__name__)
 
 settings = Settings()
 
-# The pipeline is the core of Samwise — sense → triage → dispatch.
+# Singletons set during lifespan
 _pipeline: Pipeline | None = None
 _github_sensor: GitHubSensor | None = None
-
-
-async def _notify_handler(items: list[ActivityItem]) -> None:
-    """Handle items that should be pushed to the user.
-
-    For now, this is a no-op — the API serves them from the pipeline cache.
-    Later this can push via WebSocket, system notifications, etc.
-    """
-    logger.info("Notify: %d items ready for user", len(items))
-
-
-async def _defer_handler(items: list[ActivityItem]) -> None:
-    """Handle items that should be stored for later."""
-    logger.info("Deferred: %d items stored for later", len(items))
-
-
-async def _act_handler(items: list[ActivityItem]) -> None:
-    """Handle items Samwise should act on autonomously.
-
-    Placeholder — future home of autonomous task execution.
-    """
-    for item in items:
-        logger.info("Would act on: %s — %s", item.title, item.detail)
+_notify_handler: NotifyHandler | None = None
+_defer_handler: DeferHandler | None = None
+_act_handler: ActHandler | None = None
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    global _pipeline, _github_sensor
+    global _pipeline, _github_sensor, _notify_handler, _defer_handler, _act_handler
 
     _github_sensor = GitHubSensor(settings)
 
+    # Real handlers ---
+    _notify_handler = NotifyHandler()
+    _defer_handler = DeferHandler(settings.data_dir / "deferred.json")
+    _act_handler = ActHandler(settings, _notify_handler)
+
     dispatcher = Dispatcher()
-    dispatcher.register(Disposition.NOTIFY, _notify_handler)
-    dispatcher.register(Disposition.DEFER, _defer_handler)
-    dispatcher.register(Disposition.ACT, _act_handler)
+    dispatcher.register(Disposition.NOTIFY, _notify_handler.handle)
+    dispatcher.register(Disposition.DEFER, _defer_handler.handle)
+    dispatcher.register(Disposition.ACT, _act_handler.handle)
 
     _pipeline = Pipeline(
         sensors=[_github_sensor],
@@ -66,6 +56,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     yield
 
     await _pipeline.stop()
+    await _act_handler.close()
     if _github_sensor:
         await _github_sensor.close()
 
@@ -75,9 +66,12 @@ app = FastAPI(title="Samwise", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+
+# ---------- Existing endpoints ----------
 
 
 @app.get("/api/health")
@@ -113,6 +107,49 @@ async def status() -> StatusSummary:
         text=f"$(rocket) Samwise: {detail}",
         tooltip=f"{detail}\nClick to open Activity Feed",
     )
+
+
+# ---------- SSE endpoint ----------
+
+
+@app.get("/api/events")
+async def events() -> StreamingResponse:
+    """Server-Sent Events stream — pushes notify items in real-time."""
+    if _notify_handler is None:
+        return StreamingResponse(iter([]), media_type="text/event-stream")
+
+    queue = _notify_handler.subscribe()
+
+    async def event_stream() -> AsyncGenerator[str]:
+        try:
+            while True:
+                item = await queue.get()
+                yield f"data: {item.model_dump_json()}\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            if _notify_handler:
+                _notify_handler.unsubscribe(queue)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+# ---------- Deferred endpoints ----------
+
+
+@app.get("/api/deferred")
+async def deferred() -> list[ActivityItem]:
+    if _defer_handler is None:
+        return []
+    return _defer_handler.list_items()
+
+
+@app.post("/api/deferred/flush")
+async def flush_deferred() -> list[ActivityItem]:
+    """Move all deferred items back into the activity feed."""
+    if _defer_handler is None:
+        return []
+    return _defer_handler.flush()
 
 
 def main() -> None:
