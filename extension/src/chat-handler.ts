@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
+import { BackendClient } from "./backend-client.js";
 import { getMockSprintSummary, getMockStatusSummary } from "./mock-data.js";
 
-export function createChatHandler(): vscode.ChatRequestHandler {
+export function createChatHandler(client: BackendClient): vscode.ChatRequestHandler {
   return async (
     request: vscode.ChatRequest,
     _context: vscode.ChatContext,
@@ -14,7 +15,17 @@ export function createChatHandler(): vscode.ChatRequestHandler {
         break;
       }
       case "status": {
-        stream.markdown(getMockStatusSummary());
+        stream.progress("Fetching live status...");
+        const live = await client.fetchActivity();
+        if (live && live.length > 0) {
+          const lines = ["## Samwise Status (live)", ""];
+          for (const item of live.slice(0, 15)) {
+            lines.push(`- ${item.icon} **${item.title}** — ${item.detail}`);
+          }
+          stream.markdown(lines.join("\n"));
+        } else {
+          stream.markdown(getMockStatusSummary());
+        }
         break;
       }
       case "break": {

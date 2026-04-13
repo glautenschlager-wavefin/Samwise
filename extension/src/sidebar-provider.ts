@@ -1,11 +1,15 @@
 import * as vscode from "vscode";
+import { BackendClient } from "./backend-client.js";
 import { ActivityItem, getMockActivityItems } from "./mock-data.js";
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewId = "samwise.activityFeed";
   private _view?: vscode.WebviewView;
 
-  constructor(private readonly _extensionUri: vscode.Uri) {}
+  constructor(
+    private readonly _extensionUri: vscode.Uri,
+    private readonly _client: BackendClient,
+  ) {}
 
   public resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -19,13 +23,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       localResourceRoots: [this._extensionUri],
     };
 
-    webviewView.webview.html = this._getHtml(getMockActivityItems());
+    void this.refresh();
   }
 
-  public refresh(): void {
-    if (this._view) {
-      this._view.webview.html = this._getHtml(getMockActivityItems());
+  public async refresh(): Promise<void> {
+    if (!this._view) {
+      return;
     }
+    const liveItems = await this._client.fetchActivity();
+    const items = liveItems ?? getMockActivityItems();
+    this._view.webview.html = this._getHtml(items);
   }
 
   private _getHtml(items: ActivityItem[]): string {

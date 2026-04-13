@@ -1,4 +1,4 @@
-.PHONY: help install format lint lint-fix type-check test all-checks clean ext-install ext-build ext-watch
+.PHONY: help install format lint lint-fix type-check test all-checks clean ext-install ext-build ext-watch serve
 
 help:
 	@echo "Samwise Development Commands"
@@ -17,6 +17,10 @@ help:
 	@echo "make ext-install     Install extension dependencies"
 	@echo "make ext-build       Build extension"
 	@echo "make ext-watch       Watch extension for changes"
+	@echo ""
+	@echo "Server Commands"
+	@echo "==============="
+	@echo "make serve           Start the Samwise backend server"
 
 install:
 	poetry install
@@ -57,5 +61,8 @@ ext-build:
 
 ext-watch:
 	cd extension && npm run watch
+
+serve:
+	poetry run samwise
 
 .DEFAULT_GOAL := help

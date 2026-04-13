@@ -11,8 +11,16 @@ readme = "README.md"
 license = "MIT"
 packages = [{ include = "samwise", from = "src" }]
 
+[tool.poetry.scripts]
+samwise = "samwise.server:main"
+
 [tool.poetry.dependencies]
 python = "^3.12"
+fastapi = "^0.115.0"
+uvicorn = { version = "^0.34.0", extras = ["standard"] }
+httpx = "^0.28.0"
+pydantic = "^2.10.0"
+pydantic-settings = "^2.7.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.5"

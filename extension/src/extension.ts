@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { BackendClient } from "./backend-client.js";
 import { createChatHandler } from "./chat-handler.js";
 import { getStatusBarSummary } from "./mock-data.js";
 import { SidebarProvider } from "./sidebar-provider.js";
@@ -7,8 +8,10 @@ let statusBarItem: vscode.StatusBarItem;
 let refreshInterval: ReturnType<typeof setInterval> | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
+  const client = new BackendClient();
+
   // --- Sidebar ---
-  const sidebarProvider = new SidebarProvider(context.extensionUri);
+  const sidebarProvider = new SidebarProvider(context.extensionUri, client);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(SidebarProvider.viewId, sidebarProvider),
   );
@@ -27,7 +30,10 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(statusBarItem);
 
   // --- Chat Participant ---
-  const chatParticipant = vscode.chat.createChatParticipant("samwise.chat", createChatHandler());
+  const chatParticipant = vscode.chat.createChatParticipant(
+    "samwise.chat",
+    createChatHandler(client),
+  );
   chatParticipant.iconPath = vscode.Uri.joinPath(context.extensionUri, "media", "icon.svg");
   context.subscriptions.push(chatParticipant);
 
@@ -40,28 +46,32 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand("samwise.refreshFeed", () => {
-      sidebarProvider.refresh();
+      void sidebarProvider.refresh();
       void vscode.window.showInformationMessage("Samwise: Activity feed refreshed");
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("samwise.showSummary", () => {
-      const s = getStatusBarSummary();
+    vscode.commands.registerCommand("samwise.showSummary", async () => {
+      const live = await client.fetchStatus();
+      const s = live ?? getStatusBarSummary();
       void vscode.window.showInformationMessage(s.text.replace("$(rocket) ", ""));
     }),
   );
 
-  // --- Periodic Refresh (simulates future backend polling) ---
-  refreshInterval = setInterval(
-    () => {
-      const s = getStatusBarSummary();
-      statusBarItem.text = s.text;
-      statusBarItem.tooltip = s.tooltip;
-      sidebarProvider.refresh();
-    },
-    60_000, // every 60 seconds
-  );
+  // --- Periodic Refresh ---
+  const updateStatusBar = async (): Promise<void> => {
+    const live = await client.fetchStatus();
+    const s = live ?? getStatusBarSummary();
+    statusBarItem.text = s.text;
+    statusBarItem.tooltip = s.tooltip;
+    void sidebarProvider.refresh();
+  };
+
+  refreshInterval = setInterval(() => void updateStatusBar(), 60_000);
+
+  // Also try to connect immediately
+  void updateStatusBar();
 }
 
 export function deactivate(): void {
