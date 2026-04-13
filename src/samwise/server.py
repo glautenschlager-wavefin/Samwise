@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
@@ -9,60 +8,64 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from samwise.config import Settings
-from samwise.models import ActivityItem, HealthResponse, StatusSummary
+from samwise.dispatch import Dispatcher
+from samwise.models import ActivityItem, Disposition, HealthResponse, StatusSummary
+from samwise.pipeline import Pipeline
 from samwise.sensors.github import GitHubSensor
 
 logger = logging.getLogger(__name__)
 
 settings = Settings()
 
-# Shared state: cached activity items from the latest poll
-_activity_cache: list[ActivityItem] = []
-_poll_task: asyncio.Task[None] | None = None
+# The pipeline is the core of Samwise — sense → triage → dispatch.
+_pipeline: Pipeline | None = None
 _github_sensor: GitHubSensor | None = None
 
 
-async def _poll_loop(sensor: GitHubSensor, interval: int) -> None:
-    global _activity_cache
-    while True:
-        try:
-            logger.info("Polling GitHub...")
-            items = await sensor.poll()
-            _activity_cache = sorted(items, key=lambda i: i.timestamp, reverse=True)
-            logger.info("Poll complete: %d items", len(_activity_cache))
-        except Exception:
-            logger.exception("Unexpected error in poll loop")
-        await asyncio.sleep(interval)
+async def _notify_handler(items: list[ActivityItem]) -> None:
+    """Handle items that should be pushed to the user.
+
+    For now, this is a no-op — the API serves them from the pipeline cache.
+    Later this can push via WebSocket, system notifications, etc.
+    """
+    logger.info("Notify: %d items ready for user", len(items))
+
+
+async def _defer_handler(items: list[ActivityItem]) -> None:
+    """Handle items that should be stored for later."""
+    logger.info("Deferred: %d items stored for later", len(items))
+
+
+async def _act_handler(items: list[ActivityItem]) -> None:
+    """Handle items Samwise should act on autonomously.
+
+    Placeholder — future home of autonomous task execution.
+    """
+    for item in items:
+        logger.info("Would act on: %s — %s", item.title, item.detail)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    global _poll_task, _github_sensor
+    global _pipeline, _github_sensor
 
     _github_sensor = GitHubSensor(settings)
 
-    # Run an initial poll immediately
-    try:
-        items = await _github_sensor.poll()
-        global _activity_cache
-        _activity_cache = sorted(items, key=lambda i: i.timestamp, reverse=True)
-    except Exception:
-        logger.exception("Initial poll failed")
+    dispatcher = Dispatcher()
+    dispatcher.register(Disposition.NOTIFY, _notify_handler)
+    dispatcher.register(Disposition.DEFER, _defer_handler)
+    dispatcher.register(Disposition.ACT, _act_handler)
 
-    # Start background polling
-    _poll_task = asyncio.create_task(
-        _poll_loop(_github_sensor, settings.poll_interval_seconds)
+    _pipeline = Pipeline(
+        sensors=[_github_sensor],
+        dispatcher=dispatcher,
     )
+
+    await _pipeline.start(settings.poll_interval_seconds)
 
     yield
 
-    # Shutdown
-    if _poll_task:
-        _poll_task.cancel()
-        try:
-            await _poll_task
-        except asyncio.CancelledError:
-            pass
+    await _pipeline.stop()
     if _github_sensor:
         await _github_sensor.close()
 
@@ -84,24 +87,25 @@ async def health() -> HealthResponse:
 
 @app.get("/api/activity")
 async def activity() -> list[ActivityItem]:
-    return _activity_cache
+    if _pipeline is None:
+        return []
+    return _pipeline.activity
 
 
 @app.get("/api/status")
 async def status() -> StatusSummary:
-    total = len(_activity_cache)
-    ci_failures = sum(1 for i in _activity_cache if "CI" in i.title or i.icon == "🔴")
-    reviews = sum(1 for i in _activity_cache if "Review" in i.title or "review" in i.title)
-    approved = sum(1 for i in _activity_cache if "approved" in i.title.lower())
+    items = _pipeline.activity if _pipeline else []
+    deferred_count = len(_pipeline.deferred) if _pipeline else 0
+
+    high = sum(1 for i in items if i.urgency == "high")
+    total = len(items)
 
     parts = []
-    if approved:
-        parts.append(f"{approved} approved")
-    if ci_failures:
-        parts.append(f"{ci_failures} CI failing")
-    if reviews:
-        parts.append(f"{reviews} review pending")
-    parts.append(f"{total} total")
+    if high:
+        parts.append(f"{high} urgent")
+    parts.append(f"{total} active")
+    if deferred_count:
+        parts.append(f"{deferred_count} deferred")
 
     detail = " · ".join(parts)
 

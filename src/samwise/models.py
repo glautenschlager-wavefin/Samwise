@@ -13,6 +13,18 @@ class ActivityCategory(StrEnum):
     SPRINT = "sprint"
 
 
+class Urgency(StrEnum):
+    HIGH = "high"  # surface immediately
+    NORMAL = "normal"  # show in next feed refresh
+    LOW = "low"  # batch for later
+
+
+class Disposition(StrEnum):
+    NOTIFY = "notify"  # push to the user
+    DEFER = "defer"  # store silently, surface later
+    ACT = "act"  # Samwise should handle autonomously
+
+
 class ActivityItem(BaseModel):
     id: str
     category: ActivityCategory
@@ -20,6 +32,8 @@ class ActivityItem(BaseModel):
     title: str
     detail: str
     timestamp: datetime
+    urgency: Urgency = Urgency.NORMAL
+    disposition: Disposition = Disposition.NOTIFY
 
 
 class StatusSummary(BaseModel):
