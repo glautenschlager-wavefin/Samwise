@@ -1,0 +1,57 @@
+[build-system]
+requires = ["poetry-core>=2.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "samwise"
+version = "0.1.0"
+description = "My faithful coding assistant, from green fields to Mount Doom"
+authors = ["Wave <dev@wave.com>"]
+readme = "README.md"
+license = "MIT"
+packages = [{ include = "samwise", from = "src" }]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.5"
+pytest-asyncio = "^0.26.0"
+black = "^25.1.0"
+isort = "^5.13.2"
+ruff = "^0.11.4"
+mypy = "^1.15.0"
+pre-commit = "^4.2.0"
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+py_version = 312
+known_first_party = ["samwise"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+lint.select = ["E", "F", "W", "I", "N", "UP"]
+lint.ignore = ["E501"]
+extend-exclude = ["migrations"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+check_untyped_defs = true
+follow_imports = "normal"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
+asyncio_mode = "auto"
