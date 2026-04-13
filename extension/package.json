@@ -55,6 +55,10 @@
             "description": "Toggle break reminder"
           },
           {
+            "name": "do",
+            "description": "Execute a task (e.g., merge a PR, implement a ticket)"
+          },
+          {
             "name": "help",
             "description": "List available commands"
           }
