@@ -11,6 +11,7 @@ class ActivityCategory(StrEnum):
     COMMS = "comms"
     BREAK = "break"
     SPRINT = "sprint"
+    CALENDAR = "calendar"
 
 
 class Urgency(StrEnum):

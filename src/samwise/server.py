@@ -20,6 +20,7 @@ from samwise.handlers.defer import DeferHandler
 from samwise.handlers.notify import NotifyHandler
 from samwise.models import ActivityItem, Disposition, HealthResponse, StatusSummary
 from samwise.pipeline import Pipeline
+from samwise.sensors.calendar import CalendarSensor
 from samwise.sensors.github import GitHubSensor
 from samwise.sensors.jira import JiraSensor
 
@@ -31,6 +32,7 @@ settings = Settings()
 _pipeline: Pipeline | None = None
 _github_sensor: GitHubSensor | None = None
 _jira_sensor: JiraSensor | None = None
+_calendar_sensor: CalendarSensor | None = None
 _notify_handler: NotifyHandler | None = None
 _defer_handler: DeferHandler | None = None
 _act_handler: ActHandler | None = None
@@ -38,10 +40,11 @@ _act_handler: ActHandler | None = None
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    global _pipeline, _github_sensor, _jira_sensor, _notify_handler, _defer_handler, _act_handler
+    global _pipeline, _github_sensor, _jira_sensor, _calendar_sensor, _notify_handler, _defer_handler, _act_handler
 
     _github_sensor = GitHubSensor(settings)
     _jira_sensor = JiraSensor(settings)
+    _calendar_sensor = CalendarSensor(settings)
 
     # Real handlers ---
     _notify_handler = NotifyHandler()
@@ -54,14 +57,16 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     dispatcher.register(Disposition.ACT, _act_handler.handle)
 
     _pipeline = Pipeline(
-        sensors=[_github_sensor, _jira_sensor],
+        sensors=[_github_sensor, _jira_sensor, _calendar_sensor],
         dispatcher=dispatcher,
     )
 
+    token_path = settings.data_dir / "google_token.json"
     logger.info(
-        "Samwise starting — GitHub: %s, Jira: %s",
+        "Samwise starting — GitHub: %s, Jira: %s, Calendar: %s",
         "active" if settings.github_token else "disabled (no token)",
         "active" if settings.jira_base_url else "disabled (no base URL)",
+        "active" if token_path.exists() else "disabled (run make auth-google)",
     )
 
     await _pipeline.start(settings.poll_interval_seconds)
@@ -74,6 +79,8 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         await _github_sensor.close()
     if _jira_sensor:
         await _jira_sensor.close()
+    if _calendar_sensor:
+        await _calendar_sensor.close()
 
 
 app = FastAPI(title="Samwise", version="0.1.0", lifespan=lifespan)

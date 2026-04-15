@@ -118,3 +118,41 @@ def test_low_priority_sprint_is_low_urgency() -> None:
     )
     [result] = triage([item])
     assert result.urgency == Urgency.LOW
+
+
+# --- Calendar rules ---
+
+
+def _make_calendar_item(**overrides: object) -> ActivityItem:
+    defaults = {
+        "id": "gcal-1",
+        "category": ActivityCategory.CALENDAR,
+        "icon": "📅",
+        "title": "Team Standup (in 25 min)",
+        "detail": "2:00 PM – 2:30 PM · 5 attendees",
+        "timestamp": datetime.now(tz=UTC),
+        "urgency": Urgency.NORMAL,
+        "disposition": Disposition.NOTIFY,
+        "metadata": {"event_id": "abc123", "minutes_until": "25", "attendees": "5"},
+    }
+    defaults.update(overrides)
+    return ActivityItem(**defaults)  # type: ignore[arg-type]
+
+
+def test_meeting_imminent_is_high_urgency() -> None:
+    item = _make_calendar_item(
+        title="Team Standup (in 3 min)",
+        metadata={"event_id": "abc", "minutes_until": "3", "attendees": "5"},
+    )
+    [result] = triage([item])
+    assert result.urgency == Urgency.HIGH
+
+
+def test_distant_meeting_is_deferred() -> None:
+    item = _make_calendar_item(
+        title="Sprint Review (in 90 min)",
+        metadata={"event_id": "abc", "minutes_until": "90", "attendees": "10"},
+    )
+    [result] = triage([item])
+    assert result.urgency == Urgency.LOW
+    assert result.disposition == Disposition.DEFER

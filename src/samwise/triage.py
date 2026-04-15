@@ -122,6 +122,31 @@ def _low_priority_sprint_is_low(item: ActivityItem) -> ActivityItem:
     return item
 
 
+# ---------------------------------------------------------------------------
+# Calendar rules
+# ---------------------------------------------------------------------------
+
+
+def _meeting_imminent_is_high(item: ActivityItem) -> ActivityItem:
+    """Meetings starting in 5 minutes or less are high urgency."""
+    if item.category == "calendar":
+        mins = int(item.metadata.get("minutes_until", "999"))
+        if mins <= 5:
+            return item.model_copy(update={"urgency": Urgency.HIGH})
+    return item
+
+
+def _distant_meeting_is_low(item: ActivityItem) -> ActivityItem:
+    """Meetings more than 60 minutes away can be deferred."""
+    if item.category == "calendar":
+        mins = int(item.metadata.get("minutes_until", "0"))
+        if mins > 60:
+            return item.model_copy(
+                update={"urgency": Urgency.LOW, "disposition": Disposition.DEFER}
+            )
+    return item
+
+
 # Rule registry — order matters.
 _RULES: list[TriageRule] = [
     _ci_failure_is_high_urgency,
@@ -135,4 +160,6 @@ _RULES: list[TriageRule] = [
     _highest_priority_issue_is_high,
     _status_transition_is_normal,
     _low_priority_sprint_is_low,
+    _meeting_imminent_is_high,
+    _distant_meeting_is_low,
 ]

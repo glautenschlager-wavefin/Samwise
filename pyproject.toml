@@ -13,6 +13,7 @@ packages = [{ include = "samwise", from = "src" }]
 
 [tool.poetry.scripts]
 samwise = "samwise.server:main"
+samwise-auth-google = "samwise.auth:main"
 
 [tool.poetry.dependencies]
 python = "^3.12"
@@ -22,6 +23,8 @@ httpx = "^0.28.0"
 pydantic = "^2.10.0"
 pydantic-settings = "^2.7.0"
 truststore = "^0.10.4"
+google-auth = "^2.29.0"
+google-auth-oauthlib = "^1.2.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.5"

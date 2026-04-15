@@ -18,5 +18,6 @@ class Settings(BaseSettings):
     poll_interval_seconds: int = 120
     data_dir: Path = _DEFAULT_DATA_DIR
     auto_merge: bool = False
+    google_client_secret_file: str = ""
 
     model_config = {"env_prefix": "SAMWISE_", "env_file": ".env"}

@@ -3,16 +3,18 @@ import { BackendClient } from "./backend-client.js";
 import type { ActivityItem } from "./mock-data.js";
 import { getMockSprintSummary, getMockStatusSummary } from "./mock-data.js";
 
-const SAMWISE_SYSTEM_PROMPT = `You are Samwise, a faithful coding assistant. You help your developer stay on top of their work — PRs, reviews, CI failures, sprint progress, and communications.
+const SAMWISE_SYSTEM_PROMPT = `You are Samwise, a faithful coding assistant. You help your developer stay on top of their work — PRs, reviews, CI failures, sprint progress, calendar events, and communications.
 
-Your personality: loyal, proactive, quietly competent. You speak concisely and focus on what matters. You reference specific PRs, tickets, and people when you have that context. You suggest concrete next actions.
+Your personality: loyal, proactive, quietly competent. You speak concisely and focus on what matters. You reference specific PRs, tickets, meetings, and people when you have that context. You suggest concrete next actions.
+
+When the user asks about meetings or their calendar, look for items with category "calendar" in the activity feed. If there are none, tell them there are no upcoming meetings in the next 2 hours (the polling window). Do NOT say you don't have calendar access — you do.
 
 When the user asks you to do something (implement a ticket, fix a bug, run a command), you should:
 1. Explain what you plan to do
 2. Suggest the specific terminal commands or code changes needed
 3. Ask for confirmation if the action is destructive or irreversible
 
-You have access to the user's current activity feed, which shows their open PRs, review requests, CI status, and notifications. Use this context to give informed, specific answers.`;
+You have access to the user's current activity feed, which shows their open PRs, review requests, CI status, sprint board, and upcoming calendar events (next 2 hours). Use this context to give informed, specific answers.`;
 
 function formatActivityContext(items: ActivityItem[]): string {
   if (items.length === 0) {
@@ -78,6 +80,27 @@ export function createChatHandler(client: BackendClient): vscode.ChatRequestHand
         }
         break;
       }
+      case "calendar": {
+        stream.progress("Checking calendar...");
+        const calLive = await client.fetchActivity();
+        const calItems = calLive?.filter((i) => i.category === "calendar");
+        if (calItems && calItems.length > 0) {
+          const lines = ["## 📅 Upcoming Meetings", ""];
+          for (const item of calItems) {
+            lines.push(`- ${item.icon} **${item.title}** — ${item.detail}`);
+          }
+          stream.markdown(lines.join("\n"));
+        } else if (calLive && calLive.length > 0) {
+          stream.markdown(
+            "No meetings in the next 2 hours. You're in the clear! 🎉",
+          );
+        } else {
+          stream.markdown(
+            "Can't reach the backend. Make sure the server is running (`make serve`).",
+          );
+        }
+        break;
+      }
       case "status": {
         stream.progress("Fetching live status...");
         const live = await client.fetchActivity();
@@ -106,6 +129,7 @@ export function createChatHandler(client: BackendClient): vscode.ChatRequestHand
             "| Command | Description |",
             "|---------|-------------|",
             "| `/sprint` | Show sprint board summary |",
+            "| `/calendar` | Show upcoming meetings (next 2h) |",
             "| `/status` | Show current activity status |",
             "| `/break` | Toggle break reminder |",
             "| `/do` | Execute a task (e.g., `/do merge PR #85`) |",

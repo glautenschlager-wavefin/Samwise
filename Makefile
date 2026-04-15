@@ -1,4 +1,4 @@
-.PHONY: help install format lint lint-fix type-check test all-checks clean ext-install ext-build ext-watch serve
+.PHONY: help install format lint lint-fix type-check test all-checks clean ext-install ext-build ext-watch serve auth-google
 
 help:
 	@echo "Samwise Development Commands"
@@ -21,6 +21,7 @@ help:
 	@echo "Server Commands"
 	@echo "==============="
 	@echo "make serve           Start the Samwise backend server"
+	@echo "make auth-google     Authenticate with Google Calendar"
 
 install:
 	poetry install
@@ -64,5 +65,8 @@ ext-watch:
 
 serve:
 	poetry run samwise
+
+auth-google:
+	poetry run samwise-auth-google
 
 .DEFAULT_GOAL := help

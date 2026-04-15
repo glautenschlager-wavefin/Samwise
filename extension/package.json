@@ -47,6 +47,10 @@
             "description": "Show sprint board summary"
           },
           {
+            "name": "calendar",
+            "description": "Show upcoming meetings (next 2 hours)"
+          },
+          {
             "name": "status",
             "description": "Show current activity status"
           },
