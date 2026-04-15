@@ -68,3 +68,53 @@ def test_triage_preserves_all_items() -> None:
     results = triage(items)
     assert len(results) == 3
     assert {r.id for r in results} == {"a", "b", "c"}
+
+
+# ---------------------------------------------------------------------------
+# Sprint / Jira triage rules
+# ---------------------------------------------------------------------------
+
+
+def _make_sprint_item(**overrides: object) -> ActivityItem:
+    defaults = {
+        "id": "jira-1",
+        "category": ActivityCategory.SPRINT,
+        "icon": "✅",
+        "title": "PR-100: Some task",
+        "detail": "In Progress · Medium",
+        "timestamp": datetime.now(tz=UTC),
+        "urgency": Urgency.NORMAL,
+        "disposition": Disposition.NOTIFY,
+        "metadata": {"jira_key": "PR-100", "status": "In Progress", "priority": "Medium"},
+    }
+    defaults.update(overrides)
+    return ActivityItem(**defaults)  # type: ignore[arg-type]
+
+
+def test_flagged_issue_is_high_urgency() -> None:
+    item = _make_sprint_item(title="PR-100 is flagged", icon="🚩")
+    [result] = triage([item])
+    assert result.urgency == Urgency.HIGH
+
+
+def test_highest_priority_is_high_urgency() -> None:
+    item = _make_sprint_item(
+        metadata={"jira_key": "PR-100", "status": "In Progress", "priority": "Highest"},
+    )
+    [result] = triage([item])
+    assert result.urgency == Urgency.HIGH
+
+
+def test_status_transition_is_normal_notify() -> None:
+    item = _make_sprint_item(title="PR-100 moved to Done", icon="🔀")
+    [result] = triage([item])
+    assert result.urgency == Urgency.NORMAL
+    assert result.disposition == Disposition.NOTIFY
+
+
+def test_low_priority_sprint_is_low_urgency() -> None:
+    item = _make_sprint_item(
+        metadata={"jira_key": "PR-200", "status": "To Do", "priority": "Low"},
+    )
+    [result] = triage([item])
+    assert result.urgency == Urgency.LOW

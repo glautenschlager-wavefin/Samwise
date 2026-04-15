@@ -58,7 +58,24 @@ export function createChatHandler(client: BackendClient): vscode.ChatRequestHand
   ): Promise<vscode.ChatResult> => {
     switch (request.command) {
       case "sprint": {
-        stream.markdown(getMockSprintSummary());
+        stream.progress("Fetching sprint board...");
+        const live = await client.fetchActivity();
+        const sprintItems = live?.filter((i) => i.category === "sprint");
+        if (sprintItems && sprintItems.length > 0) {
+          const lines = ["## 📋 Sprint Board (live)", ""];
+          for (const item of sprintItems) {
+            lines.push(`- ${item.icon} **${item.title}** — ${item.detail}`);
+          }
+          stream.markdown(lines.join("\n"));
+        } else if (live && live.length > 0) {
+          // Backend is up but no sprint items — show what we have
+          stream.markdown(
+            "No sprint items found in the activity feed. Is the Jira sensor configured?\n\n" +
+            "Set `SAMWISE_JIRA_BASE_URL`, `SAMWISE_JIRA_EMAIL`, and `SAMWISE_JIRA_API_TOKEN` in your `.env` file and restart the backend.",
+          );
+        } else {
+          stream.markdown(getMockSprintSummary());
+        }
         break;
       }
       case "status": {

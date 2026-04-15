@@ -86,3 +86,32 @@ class Pipeline:
             except asyncio.CancelledError:
                 pass
             self._task = None
+
+    async def ingest(self, items: list[ActivityItem]) -> list[ActivityItem]:
+        """Accept externally-pushed items (e.g. from MCP) and run them through triage→dispatch.
+
+        Returns the triaged items.  They are merged into the existing caches
+        (deduped by item id) so the activity feed stays current.
+        """
+        if not items:
+            return []
+
+        logger.info("Ingesting %d external items", len(items))
+
+        triaged = triage(items)
+
+        # Merge into caches (newer wins on id collision)
+        existing_ids = {i.id for i in self._cache} | {i.id for i in self._deferred}
+        new_notify = [i for i in triaged if i.disposition != Disposition.DEFER and i.id not in existing_ids]
+        new_deferred = [i for i in triaged if i.disposition == Disposition.DEFER and i.id not in existing_ids]
+
+        self._cache = sorted(
+            self._cache + new_notify,
+            key=lambda i: (i.urgency != "high", i.timestamp),
+            reverse=True,
+        )
+        self._deferred = self._deferred + new_deferred
+
+        await self._dispatcher.dispatch(triaged)
+
+        return triaged

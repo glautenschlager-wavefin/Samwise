@@ -5,9 +5,13 @@ import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
+import truststore
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import StreamingResponse
+
+# Use the OS certificate store (macOS Keychain) so corporate VPN CAs are trusted.
+truststore.inject_into_ssl()
 
 from samwise.config import Settings
 from samwise.dispatch import Dispatcher
@@ -17,6 +21,7 @@ from samwise.handlers.notify import NotifyHandler
 from samwise.models import ActivityItem, Disposition, HealthResponse, StatusSummary
 from samwise.pipeline import Pipeline
 from samwise.sensors.github import GitHubSensor
+from samwise.sensors.jira import JiraSensor
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +30,7 @@ settings = Settings()
 # Singletons set during lifespan
 _pipeline: Pipeline | None = None
 _github_sensor: GitHubSensor | None = None
+_jira_sensor: JiraSensor | None = None
 _notify_handler: NotifyHandler | None = None
 _defer_handler: DeferHandler | None = None
 _act_handler: ActHandler | None = None
@@ -32,9 +38,10 @@ _act_handler: ActHandler | None = None
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    global _pipeline, _github_sensor, _notify_handler, _defer_handler, _act_handler
+    global _pipeline, _github_sensor, _jira_sensor, _notify_handler, _defer_handler, _act_handler
 
     _github_sensor = GitHubSensor(settings)
+    _jira_sensor = JiraSensor(settings)
 
     # Real handlers ---
     _notify_handler = NotifyHandler()
@@ -47,8 +54,14 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     dispatcher.register(Disposition.ACT, _act_handler.handle)
 
     _pipeline = Pipeline(
-        sensors=[_github_sensor],
+        sensors=[_github_sensor, _jira_sensor],
         dispatcher=dispatcher,
+    )
+
+    logger.info(
+        "Samwise starting — GitHub: %s, Jira: %s",
+        "active" if settings.github_token else "disabled (no token)",
+        "active" if settings.jira_base_url else "disabled (no base URL)",
     )
 
     await _pipeline.start(settings.poll_interval_seconds)
@@ -59,6 +72,8 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     await _act_handler.close()
     if _github_sensor:
         await _github_sensor.close()
+    if _jira_sensor:
+        await _jira_sensor.close()
 
 
 app = FastAPI(title="Samwise", version="0.1.0", lifespan=lifespan)
@@ -150,6 +165,17 @@ async def flush_deferred() -> list[ActivityItem]:
     if _defer_handler is None:
         return []
     return _defer_handler.flush()
+
+
+# ---------- Ingest endpoint ----------
+
+
+@app.post("/api/ingest")
+async def ingest(items: list[ActivityItem]) -> list[ActivityItem]:
+    """Accept externally-pushed items (e.g. from Jira via MCP) and run them through the pipeline."""
+    if _pipeline is None:
+        return []
+    return await _pipeline.ingest(items)
 
 
 def main() -> None:

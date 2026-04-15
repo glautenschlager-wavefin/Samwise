@@ -89,6 +89,39 @@ def _notification_mention_is_high(item: ActivityItem) -> ActivityItem:
     return item
 
 
+# ---------------------------------------------------------------------------
+# Sprint / Jira rules
+# ---------------------------------------------------------------------------
+
+
+def _flagged_issue_is_high(item: ActivityItem) -> ActivityItem:
+    """Flagged/blocked Jira issues need immediate attention."""
+    if item.category == "sprint" and "flagged" in item.title.lower():
+        return item.model_copy(update={"urgency": Urgency.HIGH})
+    return item
+
+
+def _highest_priority_issue_is_high(item: ActivityItem) -> ActivityItem:
+    """Jira issues with Highest/Critical priority are high urgency."""
+    if item.category == "sprint" and item.metadata.get("priority") in ("Highest", "Critical"):
+        return item.model_copy(update={"urgency": Urgency.HIGH})
+    return item
+
+
+def _status_transition_is_normal(item: ActivityItem) -> ActivityItem:
+    """Status transitions on your tickets are worth a notification."""
+    if item.category == "sprint" and "moved to" in item.title.lower():
+        return item.model_copy(update={"urgency": Urgency.NORMAL, "disposition": Disposition.NOTIFY})
+    return item
+
+
+def _low_priority_sprint_is_low(item: ActivityItem) -> ActivityItem:
+    """Low/Lowest priority sprint items can be deferred."""
+    if item.category == "sprint" and item.metadata.get("priority") in ("Low", "Lowest"):
+        return item.model_copy(update={"urgency": Urgency.LOW})
+    return item
+
+
 # Rule registry — order matters.
 _RULES: list[TriageRule] = [
     _ci_failure_is_high_urgency,
@@ -98,4 +131,8 @@ _RULES: list[TriageRule] = [
     _changes_requested_is_high,
     _break_reminder_is_normal,
     _notification_mention_is_high,
+    _flagged_issue_is_high,
+    _highest_priority_issue_is_high,
+    _status_transition_is_normal,
+    _low_priority_sprint_is_low,
 ]
