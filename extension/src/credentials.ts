@@ -90,21 +90,34 @@ export async function setJiraToken(secrets: vscode.SecretStorage): Promise<boole
   );
 }
 
-/** Check whether essential credentials are configured (SecretStorage or env). */
+/** Check whether essential credentials are configured (SecretStorage, settings, or .env). */
 export async function hasMinimalCredentials(
   secrets: vscode.SecretStorage,
 ): Promise<boolean> {
-  // Check SecretStorage first
+  // Check SecretStorage
   const stored = await secrets.get(SECRET_GITHUB_TOKEN);
   if (stored) {
     return true;
   }
-  // Also check if the token is already available via environment (e.g. .env file)
-  if (process.env["SAMWISE_GITHUB_TOKEN"]) {
+  // Check VS Code settings + SecretStorage via buildBackendEnv
+  const env = await buildBackendEnv(secrets);
+  if (env["SAMWISE_GITHUB_TOKEN"]) {
     return true;
   }
-  // Check if the backend would receive a token via buildBackendEnv
-  // (covers the case where credentials come from VS Code settings or .env)
-  const env = await buildBackendEnv(secrets);
-  return !!env["SAMWISE_GITHUB_TOKEN"];
+  // Check the workspace .env file (read by the Python backend via pydantic-settings)
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+  if (workspaceFolder) {
+    const dotenvUri = vscode.Uri.joinPath(workspaceFolder.uri, ".env");
+    try {
+      const content = Buffer.from(
+        await vscode.workspace.fs.readFile(dotenvUri),
+      ).toString();
+      if (/^SAMWISE_GITHUB_TOKEN\s*=\s*.+/m.test(content)) {
+        return true;
+      }
+    } catch {
+      // .env doesn't exist — that's fine
+    }
+  }
+  return false;
 }
