@@ -94,6 +94,10 @@
       {
         "command": "samwise.setJiraToken",
         "title": "Samwise: Set Jira API Token"
+      },
+      {
+        "command": "samwise.authenticateGoogle",
+        "title": "Samwise: Connect Google Calendar"
       }
     ],
     "menus": {

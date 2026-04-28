@@ -88,6 +88,40 @@ export class BackendClient {
     }
   }
 
+  /** Start Google OAuth flow. Returns the auth URL to open in the browser. */
+  async startGoogleAuth(): Promise<string | null> {
+    try {
+      const resp = await fetch(`${this._baseUrl}/api/auth/google`, {
+        method: "POST",
+      });
+      if (!resp.ok) {
+        const body = (await resp.json()) as { detail?: string };
+        throw new Error(body.detail ?? `HTTP ${resp.status}`);
+      }
+      const data = (await resp.json()) as { auth_url: string };
+      return data.auth_url;
+    } catch (err) {
+      if (err instanceof Error) {
+        throw err;
+      }
+      return null;
+    }
+  }
+
+  /** Check whether Google Calendar is authenticated. */
+  async isGoogleAuthenticated(): Promise<boolean> {
+    try {
+      const resp = await fetch(`${this._baseUrl}/api/auth/google/status`);
+      if (!resp.ok) {
+        return false;
+      }
+      const data = (await resp.json()) as { authenticated: boolean };
+      return data.authenticated;
+    } catch {
+      return false;
+    }
+  }
+
   /**
    * Subscribe to the SSE event stream.  Calls `onEvent` for each pushed item.
    * Automatically reconnects on disconnect (5 s backoff).

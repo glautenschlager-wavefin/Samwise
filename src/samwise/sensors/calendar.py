@@ -158,7 +158,7 @@ class CalendarSensor(Sensor):
     async def _load_credentials(self) -> Credentials | None:
         if not self._token_path.exists():
             logger.warning(
-                "No Google Calendar token — run `make auth-google` to authenticate"
+                "No Google Calendar token — run 'Samwise: Connect Google Calendar' in VS Code"
             )
             return None
 
@@ -178,12 +178,12 @@ class CalendarSensor(Sensor):
                 self._token_path.write_text(creds.to_json())  # type: ignore[no-untyped-call]
             except Exception:
                 logger.exception(
-                    "Failed to refresh Google token — re-run `make auth-google`"
+                    "Failed to refresh Google token — re-run 'Samwise: Connect Google Calendar'"
                 )
                 return None
 
         if not creds.valid:
-            logger.warning("Google credentials invalid — re-run `make auth-google`")
+            logger.warning("Google credentials invalid — re-run 'Samwise: Connect Google Calendar'")
             return None
 
         return creds

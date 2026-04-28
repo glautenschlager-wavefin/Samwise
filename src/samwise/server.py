@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
+
+from typing import Any
 
 import truststore
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.responses import StreamingResponse
+from starlette.responses import HTMLResponse, StreamingResponse
 
 # Use the OS certificate store (macOS Keychain) so corporate VPN CAs are trusted.
 truststore.inject_into_ssl()
@@ -27,6 +31,11 @@ from samwise.sensors.jira import JiraSensor
 logger = logging.getLogger(__name__)
 
 settings = Settings()
+
+# ---------- Google OAuth state ----------
+# Holds the pending OAuth flow object while the user authorises in the browser.
+_pending_oauth_flow: Any = None  # InstalledAppFlow (lazy import)
+_actual_port: int = settings.port  # Updated in main() after port resolution
 
 # Singletons set during lifespan
 _pipeline: Pipeline | None = None
@@ -66,7 +75,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         "Samwise starting — GitHub: %s, Jira: %s, Calendar: %s",
         "active" if settings.github_token else "disabled (no token)",
         "active" if settings.jira_base_url else "disabled (no base URL)",
-        "active" if token_path.exists() else "disabled (run make auth-google)",
+        "active" if token_path.exists() else "disabled (run 'Samwise: Connect Google Calendar')",
     )
 
     await _pipeline.start(settings.poll_interval_seconds)
@@ -185,7 +194,101 @@ async def ingest(items: list[ActivityItem]) -> list[ActivityItem]:
     return await _pipeline.ingest(items)
 
 
+# ---------- Google Calendar OAuth endpoints ----------
+
+_GOOGLE_SCOPES = ["https://www.googleapis.com/auth/calendar.events.readonly"]
+
+
+@app.post("/api/auth/google")
+async def start_google_auth() -> dict[str, str]:
+    """Generate a Google OAuth URL.  The extension opens it in the browser."""
+    global _pending_oauth_flow
+
+    if not settings.google_client_secret_file:
+        raise HTTPException(
+            status_code=400,
+            detail="Set samwise.google.clientSecretPath in VS Code settings first.",
+        )
+
+    secret_path = Path(settings.google_client_secret_file)
+    if not secret_path.exists():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Client secret file not found: {secret_path}",
+        )
+
+    from google_auth_oauthlib.flow import InstalledAppFlow  # type: ignore[import-untyped]
+
+    flow = InstalledAppFlow.from_client_secrets_file(
+        str(secret_path), _GOOGLE_SCOPES
+    )
+    flow.redirect_uri = f"http://localhost:{_actual_port}/api/auth/google/callback"
+
+    auth_url, _ = flow.authorization_url(
+        access_type="offline", prompt="consent"
+    )
+    _pending_oauth_flow = flow
+    return {"auth_url": auth_url}
+
+
+@app.get("/api/auth/google/callback")
+async def google_auth_callback(
+    code: str = Query(""),
+    error: str = Query(""),
+) -> HTMLResponse:
+    """OAuth redirect handler — Google sends the user here after consent."""
+    global _pending_oauth_flow
+
+    if error:
+        _pending_oauth_flow = None
+        return HTMLResponse(
+            f"<h1>Authentication failed</h1><p>{error}</p>",
+            status_code=400,
+        )
+
+    if not _pending_oauth_flow:
+        return HTMLResponse(
+            "<h1>No pending auth flow</h1>"
+            "<p>Please start authentication from VS Code again.</p>",
+            status_code=400,
+        )
+
+    flow = _pending_oauth_flow
+    _pending_oauth_flow = None
+
+    try:
+        await asyncio.to_thread(flow.fetch_token, code=code)
+    except Exception as exc:
+        logger.exception("Failed to exchange OAuth code for token")
+        return HTMLResponse(
+            f"<h1>Token exchange failed</h1><p>{exc}</p>",
+            status_code=500,
+        )
+
+    creds = flow.credentials
+    token_path = settings.data_dir / "google_token.json"
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    token_path.write_text(creds.to_json())
+
+    logger.info("Google Calendar token saved to %s", token_path)
+    return HTMLResponse(
+        "<html><body style='font-family:system-ui;text-align:center;margin-top:80px'>"
+        "<h1>&#10003; Google Calendar Connected</h1>"
+        "<p>You can close this tab and return to VS Code.</p>"
+        "</body></html>"
+    )
+
+
+@app.get("/api/auth/google/status")
+async def google_auth_status() -> dict[str, bool]:
+    """Check whether a Google Calendar token file exists."""
+    token_path = settings.data_dir / "google_token.json"
+    return {"authenticated": token_path.exists()}
+
+
 def main() -> None:
+    global _actual_port
+
     import socket
 
     import uvicorn
@@ -201,6 +304,8 @@ def main() -> None:
                 free.bind((settings.host, 0))
                 port = free.getsockname()[1]
             logger.info("Port %d in use, auto-selected port %d", settings.port, port)
+
+    _actual_port = port
 
     # Structured line the extension watches for to know we're ready.
     print(f"SAMWISE_PORT={port}", flush=True)

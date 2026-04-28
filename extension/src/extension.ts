@@ -86,6 +86,42 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
+  context.subscriptions.push(
+    vscode.commands.registerCommand("samwise.authenticateGoogle", async () => {
+      try {
+        const authUrl = await client.startGoogleAuth();
+        if (!authUrl) {
+          void vscode.window.showErrorMessage("Samwise: Failed to start Google auth.");
+          return;
+        }
+
+        await vscode.env.openExternal(vscode.Uri.parse(authUrl));
+        void vscode.window.showInformationMessage(
+          "Samwise: Complete Google sign-in in your browser…",
+        );
+
+        // Poll for completion (up to 2 minutes, every 3 seconds)
+        for (let i = 0; i < 40; i++) {
+          await new Promise((r) => setTimeout(r, 3_000));
+          const done = await client.isGoogleAuthenticated();
+          if (done) {
+            void vscode.window.showInformationMessage(
+              "Samwise: Google Calendar connected! Events will appear on the next poll cycle.",
+            );
+            return;
+          }
+        }
+
+        void vscode.window.showWarningMessage(
+          "Samwise: Google auth timed out. Try running the command again.",
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        void vscode.window.showErrorMessage(`Samwise: Google auth failed — ${msg}`);
+      }
+    }),
+  );
+
   // --- Periodic Refresh ---
   const updateStatusBar = async (): Promise<void> => {
     const live = await client.fetchStatus();
