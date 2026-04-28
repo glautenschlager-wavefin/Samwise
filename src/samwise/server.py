@@ -10,14 +10,10 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-import truststore
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel as PydanticBaseModel
 from starlette.responses import HTMLResponse, StreamingResponse
-
-# Use the OS certificate store (macOS Keychain) so corporate VPN CAs are trusted.
-truststore.inject_into_ssl()
 
 from samwise.config import Settings
 from samwise.dispatch import Dispatcher
