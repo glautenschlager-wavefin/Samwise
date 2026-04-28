@@ -150,11 +150,13 @@
     "compile": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
     "lint": "eslint src/",
-    "vscode:prepublish": "node esbuild.mjs --production"
+    "vscode:prepublish": "node esbuild.mjs --production && node scripts/bundle-backend.mjs",
+    "package": "vsce package --no-dependencies"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.9.1",
     "esbuild": "^0.21.0",
     "typescript": "^5.5.0"
   }

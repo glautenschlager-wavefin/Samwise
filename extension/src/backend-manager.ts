@@ -3,13 +3,16 @@
  *
  * Lifecycle:
  *   1. Detect Python 3.12+
- *   2. Spawn `poetry run samwise` as a child process
- *   3. Parse `SAMWISE_PORT=<port>` from stdout to discover the bound port
- *   4. Poll /api/health until the backend is ready
- *   5. Pipe all output to a VS Code Output Channel
- *   6. On dispose, SIGTERM → grace period → SIGKILL
+ *   2. Ensure a venv exists (packaged mode) or use Poetry (dev mode)
+ *   3. Spawn the backend process
+ *   4. Parse `SAMWISE_PORT=<port>` from stdout to discover the bound port
+ *   5. Poll /api/health until the backend is ready
+ *   6. Pipe all output to a VS Code Output Channel
+ *   7. On dispose, SIGTERM → grace period → SIGKILL
  */
 
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import * as vscode from "vscode";
 
@@ -33,8 +36,24 @@ export class BackendManager implements vscode.Disposable {
   private _outputChannel: vscode.OutputChannel;
   private _disposed = false;
 
-  constructor(private readonly _workspaceRoot: string) {
+  /** Path to the bundled backend/ dir (exists only in packaged .vsix mode). */
+  private readonly _bundledBackendDir: string;
+
+  /** Whether we're running from a packaged .vsix (vs. dev mode with Poetry). */
+  private readonly _isPackaged: boolean;
+
+  /** Directory for the auto-managed venv (inside globalStorageUri). */
+  private readonly _venvDir: string;
+
+  constructor(
+    private readonly _workspaceRoot: string,
+    extensionUri: vscode.Uri,
+    globalStorageUri: vscode.Uri,
+  ) {
     this._outputChannel = vscode.window.createOutputChannel("Samwise Backend");
+    this._bundledBackendDir = join(extensionUri.fsPath, "backend");
+    this._isPackaged = existsSync(this._bundledBackendDir);
+    this._venvDir = join(globalStorageUri.fsPath, "venv");
   }
 
   /** The port the backend is listening on (null until ready). */
@@ -60,6 +79,9 @@ export class BackendManager implements vscode.Disposable {
    */
   async start(env?: Record<string, string>): Promise<void> {
     await this._ensurePython();
+    if (this._isPackaged) {
+      await this._ensureVenv();
+    }
     this._port = await this._spawnAndWaitForPort(env);
     this._outputChannel.appendLine(`Backend bound to port ${this._port}`);
     await this._waitForHealthy();
@@ -172,16 +194,33 @@ export class BackendManager implements vscode.Disposable {
         reject(new Error("Timed out waiting for backend to report its port"));
       }, PORT_TIMEOUT_MS);
 
-      const proc = spawn("poetry", ["run", "samwise"], {
-        cwd: this._workspaceRoot,
-        env: { ...process.env, ...env },
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      let proc: ChildProcess;
+
+      if (this._isPackaged) {
+        // Packaged mode: run from the venv with bundled source on PYTHONPATH
+        const venvPython = join(this._venvDir, "bin", "python3");
+        proc = spawn(venvPython, ["-m", "samwise.server"], {
+          cwd: this._bundledBackendDir,
+          env: {
+            ...process.env,
+            ...env,
+            PYTHONPATH: this._bundledBackendDir,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+      } else {
+        // Dev mode: use Poetry
+        proc = spawn("poetry", ["run", "samwise"], {
+          cwd: this._workspaceRoot,
+          env: { ...process.env, ...env },
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+      }
 
       this._process = proc;
       let portFound = false;
 
-      proc.stdout.on("data", (data: Buffer) => {
+      proc.stdout!.on("data", (data: Buffer) => {
         const text = data.toString();
         this._outputChannel.append(text);
 
@@ -195,7 +234,7 @@ export class BackendManager implements vscode.Disposable {
         }
       });
 
-      proc.stderr.on("data", (data: Buffer) => {
+      proc.stderr!.on("data", (data: Buffer) => {
         this._outputChannel.append(data.toString());
       });
 
@@ -210,6 +249,53 @@ export class BackendManager implements vscode.Disposable {
           reject(new Error(`Backend exited with code ${code} before reporting port`));
         } else {
           this._outputChannel.appendLine(`Backend exited with code ${code}`);
+        }
+      });
+    });
+  }
+
+  // -----------------------------------------------------------------
+  // Venv provisioning (packaged mode only)
+  // -----------------------------------------------------------------
+
+  private async _ensureVenv(): Promise<void> {
+    const venvPython = join(this._venvDir, "bin", "python3");
+
+    if (existsSync(venvPython)) {
+      this._outputChannel.appendLine("Venv exists — checking dependencies...");
+      await this._pipInstall();
+      return;
+    }
+
+    this._outputChannel.appendLine("Creating venv...");
+    await this._runCommand("python3", ["-m", "venv", this._venvDir]);
+    this._outputChannel.appendLine("Installing dependencies...");
+    await this._pipInstall();
+  }
+
+  private async _pipInstall(): Promise<void> {
+    const venvPip = join(this._venvDir, "bin", "pip");
+    const pyprojectPath = join(this._bundledBackendDir, "pyproject.toml");
+    // Install the project in the venv using the bundled pyproject.toml.
+    // --quiet to reduce noise; errors still surface on stderr.
+    await this._runCommand(venvPip, ["install", "--quiet", pyprojectPath]);
+  }
+
+  /**
+   * Run a command and pipe output to the output channel.
+   * Rejects if the process exits non-zero.
+   */
+  private _runCommand(cmd: string, args: string[]): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const proc = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
+      proc.stdout.on("data", (d: Buffer) => this._outputChannel.append(d.toString()));
+      proc.stderr.on("data", (d: Buffer) => this._outputChannel.append(d.toString()));
+      proc.on("error", (err) => reject(new Error(`Failed to run ${cmd}: ${err.message}`)));
+      proc.on("exit", (code) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`${cmd} exited with code ${code}`));
         }
       });
     });

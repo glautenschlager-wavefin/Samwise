@@ -1,4 +1,4 @@
-.PHONY: help install format lint lint-fix type-check test all-checks clean ext-install ext-build ext-watch serve auth-google
+.PHONY: help install format lint lint-fix type-check test all-checks clean ext-install ext-build ext-watch ext-package serve auth-google
 
 help:
 	@echo "Samwise Development Commands"
@@ -17,6 +17,7 @@ help:
 	@echo "make ext-install     Install extension dependencies"
 	@echo "make ext-build       Build extension"
 	@echo "make ext-watch       Watch extension for changes"
+	@echo "make ext-package     Package extension as .vsix"
 	@echo ""
 	@echo "Server Commands"
 	@echo "==============="
@@ -62,6 +63,9 @@ ext-build:
 
 ext-watch:
 	cd extension && npm run watch
+
+ext-package:
+	cd extension && npm run package
 
 serve:
 	poetry run samwise

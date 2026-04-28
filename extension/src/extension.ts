@@ -129,7 +129,11 @@ export function activate(context: vscode.ExtensionContext): void {
     }
 
     try {
-      backendManager = new BackendManager(workspaceFolder);
+      backendManager = new BackendManager(
+        workspaceFolder,
+        context.extensionUri,
+        context.globalStorageUri,
+      );
       context.subscriptions.push(backendManager);
 
       statusBarItem.text = "$(loading~spin) Samwise: starting...";

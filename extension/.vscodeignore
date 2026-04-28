@@ -1,7 +1,14 @@
 src/**
+scripts/**
 node_modules/**
 .vscode/**
 tsconfig.json
 esbuild.mjs
 **/*.ts
 **/*.map
+**/__pycache__/**
+**/.mypy_cache/**
+**/.pytest_cache/**
+**/*.pyc
+.env
+.env.*
