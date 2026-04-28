@@ -186,13 +186,29 @@ async def ingest(items: list[ActivityItem]) -> list[ActivityItem]:
 
 
 def main() -> None:
+    import socket
+
     import uvicorn
 
     logging.basicConfig(level=logging.INFO)
+
+    port = settings.port
+    # Auto-pick a free port if the configured one is in use.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        if s.connect_ex((settings.host, port)) == 0:
+            # Port is occupied — let the OS assign one.
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as free:
+                free.bind((settings.host, 0))
+                port = free.getsockname()[1]
+            logger.info("Port %d in use, auto-selected port %d", settings.port, port)
+
+    # Structured line the extension watches for to know we're ready.
+    print(f"SAMWISE_PORT={port}", flush=True)
+
     uvicorn.run(
         "samwise.server:app",
         host=settings.host,
-        port=settings.port,
+        port=port,
         reload=False,
     )
 

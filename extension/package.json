@@ -82,6 +82,10 @@
       {
         "command": "samwise.showSummary",
         "title": "Samwise: Show Today's Summary"
+      },
+      {
+        "command": "samwise.showBackendLog",
+        "title": "Samwise: Show Backend Log"
       }
     ],
     "menus": {

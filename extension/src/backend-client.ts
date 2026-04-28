@@ -8,11 +8,16 @@ interface StatusResponse {
 }
 
 export class BackendClient {
-  private readonly _baseUrl: string;
+  private _baseUrl: string;
   private _sseAbort: AbortController | null = null;
 
   constructor(baseUrl?: string) {
     this._baseUrl = baseUrl ?? DEFAULT_BASE_URL;
+  }
+
+  /** Update the base URL (e.g. after the backend auto-selects a port). */
+  setBaseUrl(url: string): void {
+    this._baseUrl = url;
   }
 
   async fetchActivity(): Promise<ActivityItem[] | null> {

@@ -1,11 +1,13 @@
 import * as vscode from "vscode";
 import { BackendClient } from "./backend-client.js";
+import { BackendManager } from "./backend-manager.js";
 import { createChatHandler } from "./chat-handler.js";
 import { getStatusBarSummary } from "./mock-data.js";
 import { SidebarProvider } from "./sidebar-provider.js";
 
 let statusBarItem: vscode.StatusBarItem;
 let refreshInterval: ReturnType<typeof setInterval> | undefined;
+let backendManager: BackendManager | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
   const client = new BackendClient();
@@ -59,6 +61,12 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
+  context.subscriptions.push(
+    vscode.commands.registerCommand("samwise.showBackendLog", () => {
+      backendManager?.outputChannel.show();
+    }),
+  );
+
   // --- Periodic Refresh ---
   const updateStatusBar = async (): Promise<void> => {
     const live = await client.fetchStatus();
@@ -70,31 +78,86 @@ export function activate(context: vscode.ExtensionContext): void {
 
   refreshInterval = setInterval(() => void updateStatusBar(), 60_000);
 
-  // Also try to connect immediately
-  void updateStatusBar();
+  // --- SSE helper (called once backend is ready) ---
+  const connectSse = (): void => {
+    client.subscribeEvents((item) => {
+      void sidebarProvider.refresh();
+      void updateStatusBar();
 
-  // --- SSE: real-time notifications from the backend ---
-  client.subscribeEvents((item) => {
-    // Refresh sidebar whenever something new arrives
-    void sidebarProvider.refresh();
-    void updateStatusBar();
+      if (item.urgency === "high") {
+        void vscode.window
+          .showWarningMessage(`Samwise: ${item.title}`, "Open Feed")
+          .then((choice) => {
+            if (choice === "Open Feed") {
+              void vscode.commands.executeCommand("samwise.activityFeed.focus");
+            }
+          });
+      }
+    });
+  };
 
-    // Show a VS Code notification for high-urgency items
-    if (item.urgency === "high") {
+  // --- Backend Auto-Lifecycle ---
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+
+  // Try to auto-start the backend if we're in the Samwise workspace.
+  // Otherwise, fall back to connecting to an already-running backend.
+  const startBackend = async (): Promise<void> => {
+    if (!workspaceFolder) {
+      // No workspace — just try connecting to an existing backend
+      void updateStatusBar();
+      connectSse();
+      return;
+    }
+
+    try {
+      backendManager = new BackendManager(workspaceFolder);
+      context.subscriptions.push(backendManager);
+
+      statusBarItem.text = "$(loading~spin) Samwise: starting...";
+      await backendManager.start();
+
+      client.setBaseUrl(backendManager.baseUrl);
+      void updateStatusBar();
+      connectSse();
+
+      void vscode.window.showInformationMessage(
+        `Samwise backend running on port ${backendManager.port}`,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      backendManager?.outputChannel.appendLine(`Startup failed: ${msg}`);
+
+      // Fall back to trying an already-running backend
+      statusBarItem.text = "$(warning) Samwise: backend failed";
       void vscode.window
-        .showWarningMessage(`Samwise: ${item.title}`, "Open Feed")
+        .showWarningMessage(
+          `Samwise backend failed to start: ${msg}`,
+          "Show Log",
+          "Retry",
+        )
         .then((choice) => {
-          if (choice === "Open Feed") {
-            void vscode.commands.executeCommand("samwise.activityFeed.focus");
+          if (choice === "Show Log") {
+            backendManager?.outputChannel.show();
+          } else if (choice === "Retry") {
+            void startBackend();
           }
         });
+
+      // Still try connecting in case user starts it manually
+      void updateStatusBar();
+      connectSse();
     }
-  });
+  };
+
+  void startBackend();
 }
 
-export function deactivate(): void {
+export async function deactivate(): Promise<void> {
   if (refreshInterval) {
     clearInterval(refreshInterval);
     refreshInterval = undefined;
+  }
+  if (backendManager) {
+    await backendManager.stop();
   }
 }
