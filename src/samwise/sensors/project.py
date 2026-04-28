@@ -137,6 +137,35 @@ class ProjectSensor(Sensor):
                     )
                 )
 
+        # --- Pull requests (staleness check, all states) ---
+        pr_resp = await self._client.get(
+            f"/repos/{repo}/pulls",
+            params={"state": "open", "per_page": "10", "sort": "updated", "direction": "desc"},
+        )
+        pr_resp.raise_for_status()
+        for pr in pr_resp.json():
+            updated = datetime.fromisoformat(pr["updated_at"])
+            idle = (now - updated).days
+            if (now - updated) > threshold:
+                draft_tag = " (draft)" if pr.get("draft") else ""
+                items.append(
+                    ActivityItem(
+                        id=f"proj-pr-stale-{repo}-{pr['number']}",
+                        category=ActivityCategory.PROJECT,
+                        icon="🕸️",
+                        title=f"{repo}#{pr['number']}: {pr['title']}{draft_tag}",
+                        detail=f"PR idle for {idle} days",
+                        timestamp=updated,
+                        metadata={
+                            "repo": repo,
+                            "pr_number": str(pr["number"]),
+                            "pr_stale": "true",
+                            "draft": str(pr.get("draft", False)).lower(),
+                            "idle_days": str(idle),
+                        },
+                    )
+                )
+
         # --- Recently closed issues (progress!) ---
         recently = now - timedelta(days=3)
         closed_resp = await self._client.get(

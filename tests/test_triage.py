@@ -225,3 +225,16 @@ def test_project_progress_is_deferred() -> None:
     [result] = triage([item])
     assert result.urgency == Urgency.LOW
     assert result.disposition == Disposition.DEFER
+
+
+def test_stale_pr_is_high_notify() -> None:
+    item = _make_project_item(
+        id="proj-pr-stale-owner/repo-42",
+        icon="🕸️",
+        title="owner/repo#42: WIP feature",
+        detail="PR idle for 10 days",
+        metadata={"repo": "owner/repo", "pr_number": "42", "pr_stale": "true", "draft": "false", "idle_days": "10"},
+    )
+    [result] = triage([item])
+    assert result.urgency == Urgency.HIGH
+    assert result.disposition == Disposition.NOTIFY

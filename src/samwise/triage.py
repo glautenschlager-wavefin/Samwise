@@ -191,6 +191,13 @@ def _project_progress_is_low(item: ActivityItem) -> ActivityItem:
     return item
 
 
+def _project_pr_stale(item: ActivityItem) -> ActivityItem:
+    """Stale pull requests (including drafts) need a nudge."""
+    if item.category == "project" and item.metadata.get("pr_stale") == "true":
+        return item.model_copy(update={"urgency": Urgency.HIGH, "disposition": Disposition.NOTIFY})
+    return item
+
+
 # Rule registry — order matters.
 _RULES: list[TriageRule] = [
     _ci_failure_is_high_urgency,
@@ -211,4 +218,5 @@ _RULES: list[TriageRule] = [
     _project_issue_no_assignee,
     _project_issues_summary_is_low,
     _project_progress_is_low,
+    _project_pr_stale,
 ]

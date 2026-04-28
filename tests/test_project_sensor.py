@@ -42,6 +42,15 @@ def _issue_json(number: int, title: str, state: str = "open", labels=None, updat
     }
 
 
+def _pr_json(number: int, title: str, draft: bool = False, updated_at=None) -> dict:
+    return {
+        "number": number,
+        "title": title,
+        "draft": draft,
+        "updated_at": (updated_at or datetime.now(UTC)).isoformat(),
+    }
+
+
 class _FakeResponse:
     """Minimal httpx.Response stand-in."""
 
@@ -167,3 +176,100 @@ async def test_issues_summary_when_not_in_burst():
     # Should NOT have individual burst items
     burst_items = [i for i in items if i.metadata.get("burst")]
     assert len(burst_items) == 0
+
+
+@pytest.mark.asyncio
+async def test_stale_pr_detected():
+    """A PR not updated beyond the staleness threshold is flagged."""
+    now = datetime.now(UTC)
+    pushed_recently = now - timedelta(hours=5)
+    stale_pr_update = now - timedelta(days=10)
+
+    settings = _make_settings()
+    sensor = ProjectSensor(settings)
+
+    async def fake_get(url, **kwargs):
+        if url == "/repos/owner/repo":
+            return _FakeResponse(_repo_json(pushed_recently, open_issues_count=0))
+        if "/pulls" in url:
+            return _FakeResponse([
+                _pr_json(42, "WIP feature", draft=False, updated_at=stale_pr_update),
+            ])
+        params = kwargs.get("params", {})
+        if params.get("state") == "open":
+            return _FakeResponse([])
+        return _FakeResponse([])
+
+    sensor._client = AsyncMock()
+    sensor._client.get = AsyncMock(side_effect=fake_get)
+
+    items = await sensor.poll()
+
+    stale_prs = [i for i in items if i.metadata.get("pr_stale") == "true"]
+    assert len(stale_prs) == 1
+    assert stale_prs[0].icon == "🕸️"
+    assert "42" in stale_prs[0].title
+    assert int(stale_prs[0].metadata["idle_days"]) >= 10
+
+
+@pytest.mark.asyncio
+async def test_stale_draft_pr_tagged():
+    """A stale draft PR includes the (draft) tag and draft metadata."""
+    now = datetime.now(UTC)
+    pushed_recently = now - timedelta(hours=5)
+    stale_update = now - timedelta(days=7)
+
+    settings = _make_settings()
+    sensor = ProjectSensor(settings)
+
+    async def fake_get(url, **kwargs):
+        if url == "/repos/owner/repo":
+            return _FakeResponse(_repo_json(pushed_recently, open_issues_count=0))
+        if "/pulls" in url:
+            return _FakeResponse([
+                _pr_json(99, "Draft experiment", draft=True, updated_at=stale_update),
+            ])
+        params = kwargs.get("params", {})
+        if params.get("state") == "open":
+            return _FakeResponse([])
+        return _FakeResponse([])
+
+    sensor._client = AsyncMock()
+    sensor._client.get = AsyncMock(side_effect=fake_get)
+
+    items = await sensor.poll()
+
+    stale_prs = [i for i in items if i.metadata.get("pr_stale") == "true"]
+    assert len(stale_prs) == 1
+    assert "(draft)" in stale_prs[0].title
+    assert stale_prs[0].metadata["draft"] == "true"
+
+
+@pytest.mark.asyncio
+async def test_fresh_pr_not_flagged():
+    """A recently updated PR is not flagged as stale."""
+    now = datetime.now(UTC)
+    pushed_recently = now - timedelta(hours=5)
+
+    settings = _make_settings()
+    sensor = ProjectSensor(settings)
+
+    async def fake_get(url, **kwargs):
+        if url == "/repos/owner/repo":
+            return _FakeResponse(_repo_json(pushed_recently, open_issues_count=0))
+        if "/pulls" in url:
+            return _FakeResponse([
+                _pr_json(10, "Active work", draft=False, updated_at=now - timedelta(hours=1)),
+            ])
+        params = kwargs.get("params", {})
+        if params.get("state") == "open":
+            return _FakeResponse([])
+        return _FakeResponse([])
+
+    sensor._client = AsyncMock()
+    sensor._client.get = AsyncMock(side_effect=fake_get)
+
+    items = await sensor.poll()
+
+    stale_prs = [i for i in items if i.metadata.get("pr_stale") == "true"]
+    assert len(stale_prs) == 0
