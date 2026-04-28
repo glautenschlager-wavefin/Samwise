@@ -19,5 +19,7 @@ class Settings(BaseSettings):
     data_dir: Path = _DEFAULT_DATA_DIR
     auto_merge: bool = False
     google_client_secret_file: str = ""
+    project_repos: list[str] = []
+    project_staleness_days: int = 5
 
     model_config = {"env_prefix": "SAMWISE_", "env_file": ".env"}

@@ -96,6 +96,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       border-left-color: var(--vscode-charts-green);
     }
 
+    .activity-item.project {
+      border-left-color: var(--vscode-charts-orange);
+    }
+
     .item-header {
       display: flex;
       align-items: center;

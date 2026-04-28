@@ -1,20 +1,27 @@
 import * as vscode from "vscode";
 import { BackendClient } from "./backend-client.js";
+import type { ProjectSummary, GitHubIssue } from "./backend-client.js";
 import type { ActivityItem } from "./mock-data.js";
 
 
-const SAMWISE_SYSTEM_PROMPT = `You are Samwise, a faithful coding assistant. You help your developer stay on top of their work — PRs, reviews, CI failures, sprint progress, calendar events, and communications.
+const SAMWISE_SYSTEM_PROMPT = `You are Samwise, a faithful coding assistant. You help your developer stay on top of their work — PRs, reviews, CI failures, sprint progress, calendar events, communications, and side projects.
 
 Your personality: loyal, proactive, quietly competent. You speak concisely and focus on what matters. You reference specific PRs, tickets, meetings, and people when you have that context. You suggest concrete next actions.
 
 When the user asks about meetings or their calendar, look for items with category "calendar" in the activity feed. If there are none, tell them there are no upcoming meetings in the next 2 hours (the polling window). Do NOT say you don't have calendar access — you do.
+
+When the user asks about their side projects, look for items with category "project" in the activity feed. You can also use the project tools to create, close, list, and label GitHub issues on tracked repos.
+
+When the user asks you to create an issue, extract the repo (owner/name), title, and optional body/labels. Format your response to confirm what was created with the issue number and link.
+
+When the user asks you to close an issue, confirm the repo and issue number, then close it.
 
 When the user asks you to do something (implement a ticket, fix a bug, run a command), you should:
 1. Explain what you plan to do
 2. Suggest the specific terminal commands or code changes needed
 3. Ask for confirmation if the action is destructive or irreversible
 
-You have access to the user's current activity feed, which shows their open PRs, review requests, CI status, sprint board, and upcoming calendar events (next 2 hours). Use this context to give informed, specific answers.`;
+You have access to the user's current activity feed, which shows their open PRs, review requests, CI status, sprint board, upcoming calendar events (next 2 hours), and side-project health. Use this context to give informed, specific answers.`;
 
 function formatActivityContext(items: ActivityItem[]): string {
   if (items.length === 0) {
@@ -24,6 +31,20 @@ function formatActivityContext(items: ActivityItem[]): string {
     (i) => `- [${i.category}] ${i.icon} ${i.title}: ${i.detail}`,
   );
   return `Current activity feed (${items.length} items):\n${lines.join("\n")}`;
+}
+
+function formatProjectContext(projects: ProjectSummary[]): string {
+  if (projects.length === 0) {
+    return "No side projects configured.";
+  }
+  const lines = projects.map((p) => {
+    const status = p.stale ? "STALE" : "active";
+    const pushInfo = p.last_push
+      ? `last push ${p.idle_days}d ago`
+      : "never pushed";
+    return `- ${p.repo}: ${status}, ${pushInfo}, ${p.open_issues} open issues`;
+  });
+  return `Tracked side projects:\n${lines.join("\n")}`;
 }
 
 async function selectModel(
@@ -135,13 +156,52 @@ export function createChatHandler(client: BackendClient): vscode.ChatRequestHand
             "| `/sprint` | Show sprint board summary |",
             "| `/calendar` | Show upcoming meetings (next 2h) |",
             "| `/status` | Show current activity status |",
+            "| `/projects` | Show side-project health dashboard |",
             "| `/break` | Toggle break reminder |",
             "| `/do` | Execute a task (e.g., `/do merge PR #85`) |",
             "| `/help` | Show this help message |",
             "",
+            "**Project management via chat:**",
+            "- `create issue on owner/repo: title` — create a GitHub issue",
+            "- `close issue owner/repo#123` — close an issue",
+            "- `list issues on owner/repo` — list open issues",
+            "",
             "You can also just type a message and I'll reason about it with full context.",
           ].join("\n"),
         );
+        break;
+      }
+      case "projects": {
+        stream.progress("Fetching project health...");
+        const projects = await client.fetchProjects();
+        if (projects && projects.length > 0) {
+          const lines = ["## 🔨 Side Projects", ""];
+          for (const p of projects) {
+            const health = p.stale ? "🧊 STALE" : "🟢 Active";
+            const pushInfo = p.last_push
+              ? `last push ${p.idle_days}d ago`
+              : "never pushed";
+            lines.push(
+              `### ${p.repo} — ${health}`,
+              `${pushInfo} · ${p.open_issues} open issue${p.open_issues !== 1 ? "s" : ""}`,
+              "",
+            );
+          }
+          lines.push(
+            "---",
+            "*Create issues:* `create issue on owner/repo: title`",
+            "*List issues:* `list issues on owner/repo`",
+          );
+          stream.markdown(lines.join("\n"));
+        } else if (projects) {
+          stream.markdown(
+            "No projects configured. Add repos to `samwise.projects.repos` in VS Code settings.",
+          );
+        } else {
+          stream.markdown(
+            "Can't reach the backend. Check the Samwise Backend log for errors.",
+          );
+        }
         break;
       }
       case "do": {
@@ -202,9 +262,13 @@ export function createChatHandler(client: BackendClient): vscode.ChatRequestHand
         const activityItems = (await client.fetchActivity()) ?? [];
         const activityContext = formatActivityContext(activityItems);
 
+        // Fetch project context for the LLM
+        const projectSummaries = (await client.fetchProjects()) ?? [];
+        const projectContext = formatProjectContext(projectSummaries);
+
         const messages: vscode.LanguageModelChatMessage[] = [
           vscode.LanguageModelChatMessage.User(
-            `${SAMWISE_SYSTEM_PROMPT}\n\n${activityContext}`,
+            `${SAMWISE_SYSTEM_PROMPT}\n\n${activityContext}\n\n${projectContext}`,
           ),
         ];
 

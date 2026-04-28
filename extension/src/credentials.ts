@@ -48,6 +48,17 @@ export async function buildBackendEnv(
     }
   }
 
+  // --- Array settings (comma-separated) ---
+  const repos = cfg.get<string[]>("projects.repos");
+  if (repos && repos.length > 0) {
+    env["SAMWISE_PROJECT_REPOS"] = JSON.stringify(repos);
+  }
+
+  const stalenessThreshold = cfg.get<number>("projects.stalenessThresholdDays");
+  if (stalenessThreshold !== undefined) {
+    env["SAMWISE_PROJECT_STALENESS_DAYS"] = String(stalenessThreshold);
+  }
+
   return env;
 }
 

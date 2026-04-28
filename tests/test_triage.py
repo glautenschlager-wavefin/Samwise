@@ -156,3 +156,72 @@ def test_distant_meeting_is_deferred() -> None:
     [result] = triage([item])
     assert result.urgency == Urgency.LOW
     assert result.disposition == Disposition.DEFER
+
+
+# ---------------------------------------------------------------------------
+# Project triage rules
+# ---------------------------------------------------------------------------
+
+
+def _make_project_item(**overrides: object) -> ActivityItem:
+    defaults = {
+        "id": "proj-1",
+        "category": ActivityCategory.PROJECT,
+        "icon": "🧊",
+        "title": "owner/repo is stale",
+        "detail": "7 days since last push",
+        "timestamp": datetime.now(tz=UTC),
+        "urgency": Urgency.NORMAL,
+        "disposition": Disposition.NOTIFY,
+        "metadata": {"repo": "owner/repo"},
+    }
+    defaults.update(overrides)
+    return ActivityItem(**defaults)  # type: ignore[arg-type]
+
+
+def test_stale_project_is_high_urgency() -> None:
+    item = _make_project_item(
+        metadata={"repo": "owner/repo", "idle_days": "7", "staleness": "stale"},
+    )
+    [result] = triage([item])
+    assert result.urgency == Urgency.HIGH
+    assert result.disposition == Disposition.NOTIFY
+
+
+def test_active_burst_issue_is_normal() -> None:
+    item = _make_project_item(
+        id="proj-issue-owner/repo-1",
+        icon="📌",
+        title="owner/repo#1: Add feature",
+        detail="Open issue",
+        metadata={"repo": "owner/repo", "issue_number": "1", "burst": "true"},
+    )
+    [result] = triage([item])
+    assert result.urgency == Urgency.NORMAL
+    assert result.disposition == Disposition.NOTIFY
+
+
+def test_project_issues_summary_is_deferred() -> None:
+    item = _make_project_item(
+        id="proj-issues-owner/repo",
+        icon="📋",
+        title="owner/repo: 5 open issues",
+        detail="#1 Feature · #2 Bug · #3 Task",
+        metadata={"repo": "owner/repo", "open_count": "5"},
+    )
+    [result] = triage([item])
+    assert result.urgency == Urgency.LOW
+    assert result.disposition == Disposition.DEFER
+
+
+def test_project_progress_is_deferred() -> None:
+    item = _make_project_item(
+        id="proj-closed-owner/repo",
+        icon="✅",
+        title="owner/repo: 2 issues closed recently",
+        detail="#4 Fix · #5 Cleanup",
+        metadata={"repo": "owner/repo", "progress": "true"},
+    )
+    [result] = triage([item])
+    assert result.urgency == Urgency.LOW
+    assert result.disposition == Disposition.DEFER

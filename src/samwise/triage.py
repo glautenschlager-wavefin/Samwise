@@ -147,6 +147,50 @@ def _distant_meeting_is_low(item: ActivityItem) -> ActivityItem:
     return item
 
 
+# ---------------------------------------------------------------------------
+# Project rules
+# ---------------------------------------------------------------------------
+
+
+def _project_stale_is_high(item: ActivityItem) -> ActivityItem:
+    """Stale side projects (no push beyond threshold) need aggressive nudging."""
+    if item.category == "project" and item.metadata.get("staleness") == "stale":
+        return item.model_copy(update={"urgency": Urgency.HIGH, "disposition": Disposition.NOTIFY})
+    return item
+
+
+def _project_issue_no_assignee(item: ActivityItem) -> ActivityItem:
+    """Open project issues with no assignee are normal priority."""
+    if item.category == "project" and item.metadata.get("issue_number"):
+        return item.model_copy(update={"urgency": Urgency.NORMAL, "disposition": Disposition.NOTIFY})
+    return item
+
+
+def _project_active_burst(item: ActivityItem) -> ActivityItem:
+    """During an active burst (pushed today), surface open issues as next tasks."""
+    if item.category == "project" and item.metadata.get("burst") == "true":
+        return item.model_copy(update={"urgency": Urgency.NORMAL, "disposition": Disposition.NOTIFY})
+    return item
+
+
+def _project_issues_summary_is_low(item: ActivityItem) -> ActivityItem:
+    """Open issue summaries (not in a burst) are low urgency background info."""
+    if (
+        item.category == "project"
+        and item.metadata.get("open_count")
+        and not item.metadata.get("burst")
+    ):
+        return item.model_copy(update={"urgency": Urgency.LOW, "disposition": Disposition.DEFER})
+    return item
+
+
+def _project_progress_is_low(item: ActivityItem) -> ActivityItem:
+    """Recently closed issues are positive reinforcement — low urgency, defer."""
+    if item.category == "project" and item.metadata.get("progress") == "true":
+        return item.model_copy(update={"urgency": Urgency.LOW, "disposition": Disposition.DEFER})
+    return item
+
+
 # Rule registry — order matters.
 _RULES: list[TriageRule] = [
     _ci_failure_is_high_urgency,
@@ -162,4 +206,9 @@ _RULES: list[TriageRule] = [
     _low_priority_sprint_is_low,
     _meeting_imminent_is_high,
     _distant_meeting_is_low,
+    _project_stale_is_high,
+    _project_active_burst,
+    _project_issue_no_assignee,
+    _project_issues_summary_is_low,
+    _project_progress_is_low,
 ]

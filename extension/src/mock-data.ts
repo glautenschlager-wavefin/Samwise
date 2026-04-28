@@ -1,6 +1,6 @@
 export interface ActivityItem {
   id: string;
-  category: "code-shipping" | "comms" | "break" | "sprint" | "calendar";
+  category: "code-shipping" | "comms" | "break" | "sprint" | "calendar" | "project";
   urgency?: "high" | "medium" | "low";
   icon: string;
   title: string;

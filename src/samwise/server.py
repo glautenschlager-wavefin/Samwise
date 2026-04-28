@@ -9,9 +9,11 @@ from pathlib import Path
 
 from typing import Any
 
+import httpx
 import truststore
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel as PydanticBaseModel
 from starlette.responses import HTMLResponse, StreamingResponse
 
 # Use the OS certificate store (macOS Keychain) so corporate VPN CAs are trusted.
@@ -27,6 +29,7 @@ from samwise.pipeline import Pipeline
 from samwise.sensors.calendar import CalendarSensor
 from samwise.sensors.github import GitHubSensor
 from samwise.sensors.jira import JiraSensor
+from samwise.sensors.project import ProjectSensor
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +45,7 @@ _pipeline: Pipeline | None = None
 _github_sensor: GitHubSensor | None = None
 _jira_sensor: JiraSensor | None = None
 _calendar_sensor: CalendarSensor | None = None
+_project_sensor: ProjectSensor | None = None
 _notify_handler: NotifyHandler | None = None
 _defer_handler: DeferHandler | None = None
 _act_handler: ActHandler | None = None
@@ -49,11 +53,12 @@ _act_handler: ActHandler | None = None
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    global _pipeline, _github_sensor, _jira_sensor, _calendar_sensor, _notify_handler, _defer_handler, _act_handler
+    global _pipeline, _github_sensor, _jira_sensor, _calendar_sensor, _project_sensor, _notify_handler, _defer_handler, _act_handler
 
     _github_sensor = GitHubSensor(settings)
     _jira_sensor = JiraSensor(settings)
     _calendar_sensor = CalendarSensor(settings)
+    _project_sensor = ProjectSensor(settings)
 
     # Real handlers ---
     _notify_handler = NotifyHandler()
@@ -66,16 +71,17 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     dispatcher.register(Disposition.ACT, _act_handler.handle)
 
     _pipeline = Pipeline(
-        sensors=[_github_sensor, _jira_sensor, _calendar_sensor],
+        sensors=[_github_sensor, _jira_sensor, _calendar_sensor, _project_sensor],
         dispatcher=dispatcher,
     )
 
     token_path = settings.data_dir / "google_token.json"
     logger.info(
-        "Samwise starting — GitHub: %s, Jira: %s, Calendar: %s",
+        "Samwise starting — GitHub: %s, Jira: %s, Calendar: %s, Projects: %s",
         "active" if settings.github_token else "disabled (no token)",
         "active" if settings.jira_base_url else "disabled (no base URL)",
         "active" if token_path.exists() else "disabled (run 'Samwise: Connect Google Calendar')",
+        f"{len(settings.project_repos)} repos" if settings.project_repos else "disabled (no repos configured)",
     )
 
     await _pipeline.start(settings.poll_interval_seconds)
@@ -90,6 +96,8 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         await _jira_sensor.close()
     if _calendar_sensor:
         await _calendar_sensor.close()
+    if _project_sensor:
+        await _project_sensor.close()
 
 
 app = FastAPI(title="Samwise", version="0.1.0", lifespan=lifespan)
@@ -97,7 +105,7 @@ app = FastAPI(title="Samwise", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PATCH"],
     allow_headers=["*"],
 )
 
@@ -192,6 +200,156 @@ async def ingest(items: list[ActivityItem]) -> list[ActivityItem]:
     if _pipeline is None:
         return []
     return await _pipeline.ingest(items)
+
+
+# ---------- Project endpoints ----------
+
+_github_http: httpx.AsyncClient | None = None
+
+
+def _get_github_http() -> httpx.AsyncClient:
+    global _github_http
+    if _github_http is None:
+        _github_http = httpx.AsyncClient(
+            base_url="https://api.github.com",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {settings.github_token}",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            timeout=15.0,
+        )
+    return _github_http
+
+
+class ProjectSummary(PydanticBaseModel):
+    repo: str
+    last_push: str | None = None
+    idle_days: int = 0
+    stale: bool = False
+    open_issues: int = 0
+
+
+@app.get("/api/projects")
+async def list_projects() -> list[ProjectSummary]:
+    """Health dashboard for tracked side-project repos."""
+    from datetime import UTC, datetime, timedelta
+
+    repos = settings.project_repos
+    if not repos:
+        return []
+
+    client = _get_github_http()
+    results: list[ProjectSummary] = []
+    now = datetime.now(UTC)
+    threshold = timedelta(days=settings.project_staleness_days)
+
+    for repo in repos:
+        try:
+            resp = await client.get(f"/repos/{repo}")
+            resp.raise_for_status()
+            data = resp.json()
+            pushed_at_str = data.get("pushed_at")
+            idle_days = 0
+            stale = False
+            if pushed_at_str:
+                pushed_at = datetime.fromisoformat(pushed_at_str)
+                idle_days = (now - pushed_at).days
+                stale = (now - pushed_at) > threshold
+
+            results.append(
+                ProjectSummary(
+                    repo=repo,
+                    last_push=pushed_at_str,
+                    idle_days=idle_days,
+                    stale=stale,
+                    open_issues=data.get("open_issues_count", 0),
+                )
+            )
+        except httpx.HTTPError:
+            logger.warning("Failed to fetch project info for %s", repo)
+            results.append(ProjectSummary(repo=repo))
+
+    return results
+
+
+@app.get("/api/projects/{owner}/{repo}/issues")
+async def list_project_issues(
+    owner: str,
+    repo: str,
+    state: str = Query("open"),
+) -> list[dict]:
+    """List issues for a tracked project repo."""
+    client = _get_github_http()
+    resp = await client.get(
+        f"/repos/{owner}/{repo}/issues",
+        params={"state": state, "per_page": "30", "sort": "updated", "direction": "desc"},
+    )
+    resp.raise_for_status()
+    # Filter out pull requests (GitHub API returns them mixed in)
+    return [i for i in resp.json() if "pull_request" not in i]
+
+
+class CreateIssueRequest(PydanticBaseModel):
+    title: str
+    body: str = ""
+    labels: list[str] = []
+    assignee: str | None = None
+
+
+@app.post("/api/projects/{owner}/{repo}/issues")
+async def create_project_issue(
+    owner: str,
+    repo: str,
+    req: CreateIssueRequest,
+) -> dict:
+    """Create a new issue on a tracked project repo."""
+    client = _get_github_http()
+    payload: dict = {"title": req.title}
+    if req.body:
+        payload["body"] = req.body
+    if req.labels:
+        payload["labels"] = req.labels
+    if req.assignee:
+        payload["assignees"] = [req.assignee]
+
+    resp = await client.post(f"/repos/{owner}/{repo}/issues", json=payload)
+    resp.raise_for_status()
+    return resp.json()
+
+
+class UpdateIssueRequest(PydanticBaseModel):
+    state: str | None = None
+    labels: list[str] | None = None
+    assignee: str | None = None
+    title: str | None = None
+    body: str | None = None
+
+
+@app.patch("/api/projects/{owner}/{repo}/issues/{number}")
+async def update_project_issue(
+    owner: str,
+    repo: str,
+    number: int,
+    req: UpdateIssueRequest,
+) -> dict:
+    """Update an issue (close, label, assign, etc.)."""
+    client = _get_github_http()
+    payload: dict = {}
+    if req.state is not None:
+        payload["state"] = req.state
+    if req.labels is not None:
+        payload["labels"] = req.labels
+    if req.assignee is not None:
+        payload["assignees"] = [req.assignee]
+    if req.title is not None:
+        payload["title"] = req.title
+    if req.body is not None:
+        payload["body"] = req.body
+
+    resp = await client.patch(f"/repos/{owner}/{repo}/issues/{number}", json=payload)
+    resp.raise_for_status()
+    return resp.json()
 
 
 # ---------- Google Calendar OAuth endpoints ----------

@@ -7,6 +7,26 @@ interface StatusResponse {
   tooltip: string;
 }
 
+export interface ProjectSummary {
+  repo: string;
+  last_push: string | null;
+  idle_days: number;
+  stale: boolean;
+  open_issues: number;
+}
+
+export interface GitHubIssue {
+  number: number;
+  title: string;
+  state: string;
+  body: string | null;
+  labels: Array<{ name: string }>;
+  assignee: { login: string } | null;
+  html_url: string;
+  updated_at: string;
+  created_at: string;
+}
+
 export class BackendClient {
   private _baseUrl: string;
   private _sseAbort: AbortController | null = null;
@@ -119,6 +139,102 @@ export class BackendClient {
       return data.authenticated;
     } catch {
       return false;
+    }
+  }
+
+  // ---------- Project endpoints ----------
+
+  /** Fetch tracked project health summaries. */
+  async fetchProjects(): Promise<ProjectSummary[] | null> {
+    try {
+      const resp = await fetch(`${this._baseUrl}/api/projects`);
+      if (!resp.ok) {
+        return null;
+      }
+      return (await resp.json()) as ProjectSummary[];
+    } catch {
+      return null;
+    }
+  }
+
+  /** Fetch issues for a specific project repo. */
+  async fetchProjectIssues(
+    owner: string,
+    repo: string,
+    state: string = "open",
+  ): Promise<GitHubIssue[] | null> {
+    try {
+      const resp = await fetch(
+        `${this._baseUrl}/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues?state=${encodeURIComponent(state)}`,
+      );
+      if (!resp.ok) {
+        return null;
+      }
+      return (await resp.json()) as GitHubIssue[];
+    } catch {
+      return null;
+    }
+  }
+
+  /** Create an issue on a tracked project repo. */
+  async createIssue(
+    owner: string,
+    repo: string,
+    title: string,
+    body?: string,
+    labels?: string[],
+    assignee?: string,
+  ): Promise<GitHubIssue | null> {
+    try {
+      const payload: Record<string, unknown> = { title };
+      if (body) {
+        payload.body = body;
+      }
+      if (labels && labels.length > 0) {
+        payload.labels = labels;
+      }
+      if (assignee) {
+        payload.assignee = assignee;
+      }
+      const resp = await fetch(
+        `${this._baseUrl}/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
+      if (!resp.ok) {
+        return null;
+      }
+      return (await resp.json()) as GitHubIssue;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Update an issue (close, label, assign, etc.). */
+  async updateIssue(
+    owner: string,
+    repo: string,
+    number: number,
+    update: { state?: string; labels?: string[]; assignee?: string; title?: string; body?: string },
+  ): Promise<GitHubIssue | null> {
+    try {
+      const resp = await fetch(
+        `${this._baseUrl}/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${number}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(update),
+        },
+      );
+      if (!resp.ok) {
+        return null;
+      }
+      return (await resp.json()) as GitHubIssue;
+    } catch {
+      return null;
     }
   }
 

@@ -63,6 +63,10 @@
             "description": "Execute a task (e.g., merge a PR, implement a ticket)"
           },
           {
+            "name": "projects",
+            "description": "Show side-project health dashboard and manage issues"
+          },
+          {
             "name": "help",
             "description": "List available commands"
           }
@@ -146,6 +150,19 @@
           "type": "boolean",
           "default": false,
           "description": "Allow Samwise to auto-merge approved PRs that pass CI."
+        },
+        "samwise.projects.repos": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "GitHub repos to track as side projects (e.g. 'owner/repo'). Samwise monitors staleness and issues."
+        },
+        "samwise.projects.stalenessThresholdDays": {
+          "type": "number",
+          "default": 5,
+          "description": "Days without a push before a project is flagged as stale."
         }
       }
     }
