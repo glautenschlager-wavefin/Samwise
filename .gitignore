@@ -218,4 +218,4 @@ extension/backend/
 
 # macOS
 .DS_Store
-extension/out/*.vsix
+*.vsix
