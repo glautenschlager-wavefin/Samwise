@@ -90,10 +90,21 @@ export async function setJiraToken(secrets: vscode.SecretStorage): Promise<boole
   );
 }
 
-/** Check whether essential credentials are configured. */
+/** Check whether essential credentials are configured (SecretStorage or env). */
 export async function hasMinimalCredentials(
   secrets: vscode.SecretStorage,
 ): Promise<boolean> {
-  const githubToken = await secrets.get(SECRET_GITHUB_TOKEN);
-  return !!githubToken;
+  // Check SecretStorage first
+  const stored = await secrets.get(SECRET_GITHUB_TOKEN);
+  if (stored) {
+    return true;
+  }
+  // Also check if the token is already available via environment (e.g. .env file)
+  if (process.env["SAMWISE_GITHUB_TOKEN"]) {
+    return true;
+  }
+  // Check if the backend would receive a token via buildBackendEnv
+  // (covers the case where credentials come from VS Code settings or .env)
+  const env = await buildBackendEnv(secrets);
+  return !!env["SAMWISE_GITHUB_TOKEN"];
 }
