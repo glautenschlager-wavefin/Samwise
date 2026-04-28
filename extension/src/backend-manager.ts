@@ -275,10 +275,9 @@ export class BackendManager implements vscode.Disposable {
 
   private async _pipInstall(): Promise<void> {
     const venvPip = join(this._venvDir, "bin", "pip");
-    const pyprojectPath = join(this._bundledBackendDir, "pyproject.toml");
-    // Install the project in the venv using the bundled pyproject.toml.
+    // Install the project from the bundled backend directory (contains pyproject.toml).
     // --quiet to reduce noise; errors still surface on stderr.
-    await this._runCommand(venvPip, ["install", "--quiet", pyprojectPath]);
+    await this._runCommand(venvPip, ["install", "--quiet", this._bundledBackendDir]);
   }
 
   /**
