@@ -3,7 +3,7 @@ import { BackendClient } from "./backend-client.js";
 import { BackendManager } from "./backend-manager.js";
 import { createChatHandler } from "./chat-handler.js";
 import { buildBackendEnv, hasMinimalCredentials, setGithubToken, setJiraToken } from "./credentials.js";
-import { getStatusBarSummary } from "./mock-data.js";
+
 import { SidebarProvider } from "./sidebar-provider.js";
 
 let statusBarItem: vscode.StatusBarItem;
@@ -25,9 +25,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.StatusBarAlignment.Right,
     100,
   );
-  const summary = getStatusBarSummary();
-  statusBarItem.text = summary.text;
-  statusBarItem.tooltip = summary.tooltip;
+  statusBarItem.text = "$(rocket) Samwise";
+  statusBarItem.tooltip = "Samwise — starting…";
   statusBarItem.command = "samwise.openPanel";
   statusBarItem.show();
   context.subscriptions.push(statusBarItem);
@@ -57,8 +56,11 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("samwise.showSummary", async () => {
       const live = await client.fetchStatus();
-      const s = live ?? getStatusBarSummary();
-      void vscode.window.showInformationMessage(s.text.replace("$(rocket) ", ""));
+      if (live) {
+        void vscode.window.showInformationMessage(live.text.replace("$(rocket) ", ""));
+      } else {
+        void vscode.window.showInformationMessage("Samwise backend is not running.");
+      }
     }),
   );
 
@@ -125,9 +127,10 @@ export function activate(context: vscode.ExtensionContext): void {
   // --- Periodic Refresh ---
   const updateStatusBar = async (): Promise<void> => {
     const live = await client.fetchStatus();
-    const s = live ?? getStatusBarSummary();
-    statusBarItem.text = s.text;
-    statusBarItem.tooltip = s.tooltip;
+    if (live) {
+      statusBarItem.text = live.text;
+      statusBarItem.tooltip = live.tooltip;
+    }
     void sidebarProvider.refresh();
   };
 

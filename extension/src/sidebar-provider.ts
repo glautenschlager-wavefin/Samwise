@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { BackendClient } from "./backend-client.js";
-import { ActivityItem, getMockActivityItems } from "./mock-data.js";
+import type { ActivityItem } from "./mock-data.js";
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewId = "samwise.activityFeed";
@@ -30,8 +30,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (!this._view) {
       return;
     }
-    const liveItems = await this._client.fetchActivity();
-    const items = liveItems ?? getMockActivityItems();
+    const items = (await this._client.fetchActivity()) ?? [];
     this._view.webview.html = this._getHtml(items);
   }
 

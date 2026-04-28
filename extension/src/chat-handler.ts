@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { BackendClient } from "./backend-client.js";
 import type { ActivityItem } from "./mock-data.js";
-import { getMockSprintSummary, getMockStatusSummary } from "./mock-data.js";
+
 
 const SAMWISE_SYSTEM_PROMPT = `You are Samwise, a faithful coding assistant. You help your developer stay on top of their work — PRs, reviews, CI failures, sprint progress, calendar events, and communications.
 
@@ -76,7 +76,9 @@ export function createChatHandler(client: BackendClient): vscode.ChatRequestHand
             "Set `SAMWISE_JIRA_BASE_URL`, `SAMWISE_JIRA_EMAIL`, and `SAMWISE_JIRA_API_TOKEN` in your `.env` file and restart the backend.",
           );
         } else {
-          stream.markdown(getMockSprintSummary());
+          stream.markdown(
+            "Can't reach the backend. Check the Samwise Backend log for errors.",
+          );
         }
         break;
       }
@@ -111,7 +113,9 @@ export function createChatHandler(client: BackendClient): vscode.ChatRequestHand
           }
           stream.markdown(lines.join("\n"));
         } else {
-          stream.markdown(getMockStatusSummary());
+          stream.markdown(
+            "Can't reach the backend. Check the Samwise Backend log for errors.",
+          );
         }
         break;
       }
