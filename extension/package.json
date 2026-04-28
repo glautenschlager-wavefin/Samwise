@@ -86,6 +86,14 @@
       {
         "command": "samwise.showBackendLog",
         "title": "Samwise: Show Backend Log"
+      },
+      {
+        "command": "samwise.setGithubToken",
+        "title": "Samwise: Set GitHub Token"
+      },
+      {
+        "command": "samwise.setJiraToken",
+        "title": "Samwise: Set Jira API Token"
       }
     ],
     "menus": {
@@ -96,6 +104,46 @@
           "group": "navigation"
         }
       ]
+    },
+    "configuration": {
+      "title": "Samwise",
+      "properties": {
+        "samwise.github.username": {
+          "type": "string",
+          "default": "",
+          "description": "Your GitHub username (for PR / notification monitoring)."
+        },
+        "samwise.jira.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Jira instance base URL, e.g. https://yourorg.atlassian.net"
+        },
+        "samwise.jira.email": {
+          "type": "string",
+          "default": "",
+          "description": "Email address for Jira API authentication."
+        },
+        "samwise.google.clientSecretPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Google OAuth client_secret JSON file (for Calendar integration)."
+        },
+        "samwise.backend.port": {
+          "type": "number",
+          "default": 9474,
+          "description": "Preferred port for the backend server (auto-picks another if occupied)."
+        },
+        "samwise.backend.pollIntervalSeconds": {
+          "type": "number",
+          "default": 120,
+          "description": "How often (in seconds) sensors poll for new data."
+        },
+        "samwise.backend.autoMerge": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow Samwise to auto-merge approved PRs that pass CI."
+        }
+      }
     }
   },
   "scripts": {

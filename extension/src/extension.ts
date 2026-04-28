@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { BackendClient } from "./backend-client.js";
 import { BackendManager } from "./backend-manager.js";
 import { createChatHandler } from "./chat-handler.js";
+import { buildBackendEnv, hasMinimalCredentials, setGithubToken, setJiraToken } from "./credentials.js";
 import { getStatusBarSummary } from "./mock-data.js";
 import { SidebarProvider } from "./sidebar-provider.js";
 
@@ -67,6 +68,24 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
+  context.subscriptions.push(
+    vscode.commands.registerCommand("samwise.setGithubToken", async () => {
+      const stored = await setGithubToken(context.secrets);
+      if (stored) {
+        void vscode.window.showInformationMessage("GitHub token saved. Restart Samwise to apply.");
+      }
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("samwise.setJiraToken", async () => {
+      const stored = await setJiraToken(context.secrets);
+      if (stored) {
+        void vscode.window.showInformationMessage("Jira API token saved. Restart Samwise to apply.");
+      }
+    }),
+  );
+
   // --- Periodic Refresh ---
   const updateStatusBar = async (): Promise<void> => {
     const live = await client.fetchStatus();
@@ -114,7 +133,10 @@ export function activate(context: vscode.ExtensionContext): void {
       context.subscriptions.push(backendManager);
 
       statusBarItem.text = "$(loading~spin) Samwise: starting...";
-      await backendManager.start();
+
+      // Build env vars from VS Code settings + SecretStorage
+      const credEnv = await buildBackendEnv(context.secrets);
+      await backendManager.start(credEnv);
 
       client.setBaseUrl(backendManager.baseUrl);
       void updateStatusBar();
@@ -149,7 +171,31 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   };
 
-  void startBackend();
+  // --- First-run setup wizard ---
+  const maybeShowSetupWizard = async (): Promise<void> => {
+    const hasCredentials = await hasMinimalCredentials(context.secrets);
+    if (hasCredentials) {
+      return;
+    }
+
+    const choice = await vscode.window.showInformationMessage(
+      "Welcome to Samwise! Set up your GitHub token to get started.",
+      "Set GitHub Token",
+      "Open Settings",
+      "Later",
+    );
+
+    if (choice === "Set GitHub Token") {
+      await setGithubToken(context.secrets);
+    } else if (choice === "Open Settings") {
+      void vscode.commands.executeCommand(
+        "workbench.action.openSettings",
+        "samwise",
+      );
+    }
+  };
+
+  void maybeShowSetupWizard().then(() => startBackend());
 }
 
 export async function deactivate(): Promise<void> {
