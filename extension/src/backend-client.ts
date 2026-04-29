@@ -238,6 +238,24 @@ export class BackendClient {
     }
   }
 
+  /** Post a workspace event to trigger a targeted pipeline run. */
+  async postEvent(event: {
+    type: string;
+    workspace?: string;
+    branch?: string;
+    detail?: string;
+  }): Promise<void> {
+    try {
+      await fetch(`${this._baseUrl}/api/events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(event),
+      });
+    } catch {
+      // Best-effort — don't surface errors to the user.
+    }
+  }
+
   /**
    * Subscribe to the SSE event stream.  Calls `onEvent` for each pushed item.
    * Automatically reconnects on disconnect (5 s backoff).

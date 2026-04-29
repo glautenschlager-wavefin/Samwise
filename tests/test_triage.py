@@ -238,3 +238,117 @@ def test_stale_pr_is_high_notify() -> None:
     [result] = triage([item])
     assert result.urgency == Urgency.HIGH
     assert result.disposition == Disposition.NOTIFY
+
+
+# ---------------------------------------------------------------------------
+# PR SLA triage rules
+# ---------------------------------------------------------------------------
+
+
+def test_sla_pr_too_large_is_high() -> None:
+    item = _make_item(
+        id="sla-size-repo-42",
+        icon="📏",
+        title="owner/repo#42 is too large (800 lines)",
+        detail="SLA violation: 800 lines changed vs 600 max",
+        metadata={"sla_violation": "size", "pr_number": "42"},
+    )
+    [result] = triage([item])
+    assert result.urgency == Urgency.HIGH
+    assert result.disposition == Disposition.NOTIFY
+
+
+def test_sla_pr_aging_is_high() -> None:
+    item = _make_item(
+        id="sla-age-repo-42",
+        icon="⏳",
+        title="owner/repo#42 open for 10 days",
+        detail="SLA violation: open 10 days vs 7 day limit",
+        metadata={"sla_violation": "age", "pr_number": "42"},
+    )
+    [result] = triage([item])
+    assert result.urgency == Urgency.HIGH
+    assert result.disposition == Disposition.NOTIFY
+
+
+def test_sla_pr_needs_review_is_normal() -> None:
+    item = _make_item(
+        id="sla-review-repo-42",
+        icon="👁️",
+        title="owner/repo#42 has 3 pushes without review",
+        detail="SLA violation: 3 commits without review vs 2 max",
+        metadata={"sla_violation": "review_wait", "pr_number": "42"},
+    )
+    [result] = triage([item])
+    assert result.urgency == Urgency.NORMAL
+    assert result.disposition == Disposition.NOTIFY
+
+
+# ---------------------------------------------------------------------------
+# Workspace triage rules
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_conflict_warning_is_high() -> None:
+    item = _make_item(
+        id="ws-conflict-repo",
+        icon="⚠️",
+        title="feature-branch → main: merge conflicts likely",
+        detail="25 commits behind, conflicts in 3 files",
+        metadata={"sensor_type": "workspace", "conflict_warning": "true"},
+    )
+    [result] = triage([item])
+    assert result.urgency == Urgency.HIGH
+    assert result.disposition == Disposition.NOTIFY
+
+
+def test_workspace_divergence_is_normal() -> None:
+    item = _make_item(
+        id="ws-drift-repo",
+        icon="🔀",
+        title="feature-branch is drifting from main",
+        detail="30 commits behind",
+        metadata={"sensor_type": "workspace", "divergence_warning": "true"},
+    )
+    [result] = triage([item])
+    assert result.urgency == Urgency.NORMAL
+    assert result.disposition == Disposition.NOTIFY
+
+
+def test_workspace_unpushed_is_low() -> None:
+    item = _make_item(
+        id="ws-unpushed-repo",
+        icon="📤",
+        title="4 unpushed commits on feature-branch",
+        detail="Local changes not yet on remote",
+        metadata={"sensor_type": "workspace", "unpushed": "4"},
+    )
+    [result] = triage([item])
+    assert result.urgency == Urgency.LOW
+    assert result.disposition == Disposition.NOTIFY
+
+
+def test_workspace_debug_artifacts_is_normal() -> None:
+    item = _make_item(
+        id="ws-debug-repo",
+        icon="🐛",
+        title="Debug artifacts found in 2 files",
+        detail="app.py:5 breakpoint() · utils.js:12 console.log",
+        metadata={"sensor_type": "workspace", "debug_artifacts": "true"},
+    )
+    [result] = triage([item])
+    assert result.urgency == Urgency.NORMAL
+    assert result.disposition == Disposition.NOTIFY
+
+
+def test_workspace_preflight_failure_is_high() -> None:
+    item = _make_item(
+        id="ws-preflight-repo",
+        icon="🚫",
+        title="Preflight failed: lint",
+        detail="eslint returned exit code 1",
+        metadata={"sensor_type": "workspace", "preflight_failure": "true"},
+    )
+    [result] = triage([item])
+    assert result.urgency == Urgency.HIGH
+    assert result.disposition == Disposition.NOTIFY

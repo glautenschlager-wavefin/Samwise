@@ -3,6 +3,7 @@ import { BackendClient } from "./backend-client.js";
 import { BackendManager } from "./backend-manager.js";
 import { createChatHandler } from "./chat-handler.js";
 import { buildBackendEnv, hasMinimalCredentials, setGithubToken, setJiraToken } from "./credentials.js";
+import { EventMonitor } from "./event-monitor.js";
 
 import { SidebarProvider } from "./sidebar-provider.js";
 
@@ -137,7 +138,13 @@ export function activate(context: vscode.ExtensionContext): void {
   refreshInterval = setInterval(() => void updateStatusBar(), 60_000);
 
   // --- SSE helper (called once backend is ready) ---
+  const eventMonitor = new EventMonitor(client);
+  context.subscriptions.push(eventMonitor);
+
   const connectSse = (): void => {
+    // Start the event monitor to send VS Code events to the backend.
+    eventMonitor.activate(context);
+
     client.subscribeEvents((item) => {
       void sidebarProvider.refresh();
       void updateStatusBar();

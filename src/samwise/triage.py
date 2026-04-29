@@ -198,6 +198,72 @@ def _project_pr_stale(item: ActivityItem) -> ActivityItem:
     return item
 
 
+# ---------------------------------------------------------------------------
+# PR SLA rules
+# ---------------------------------------------------------------------------
+
+
+def _sla_pr_too_large(item: ActivityItem) -> ActivityItem:
+    """PRs exceeding the line limit need to be split."""
+    if item.metadata.get("sla_violation") == "size":
+        return item.model_copy(update={"urgency": Urgency.HIGH, "disposition": Disposition.NOTIFY})
+    return item
+
+
+def _sla_pr_aging(item: ActivityItem) -> ActivityItem:
+    """PRs open too long need to be merged or closed."""
+    if item.metadata.get("sla_violation") == "age":
+        return item.model_copy(update={"urgency": Urgency.HIGH, "disposition": Disposition.NOTIFY})
+    return item
+
+
+def _sla_pr_needs_review(item: ActivityItem) -> ActivityItem:
+    """PRs with many commits but no review need attention."""
+    if item.metadata.get("sla_violation") == "review_wait":
+        return item.model_copy(update={"urgency": Urgency.NORMAL, "disposition": Disposition.NOTIFY})
+    return item
+
+
+# ---------------------------------------------------------------------------
+# Workspace rules
+# ---------------------------------------------------------------------------
+
+
+def _workspace_conflict_warning(item: ActivityItem) -> ActivityItem:
+    """Merge conflict warnings are high urgency."""
+    if item.metadata.get("conflict_warning") == "true":
+        return item.model_copy(update={"urgency": Urgency.HIGH, "disposition": Disposition.NOTIFY})
+    return item
+
+
+def _workspace_divergence(item: ActivityItem) -> ActivityItem:
+    """Branch divergence (no conflicts yet) is a normal nudge."""
+    if item.metadata.get("divergence_warning") == "true":
+        return item.model_copy(update={"urgency": Urgency.NORMAL, "disposition": Disposition.NOTIFY})
+    return item
+
+
+def _workspace_unpushed(item: ActivityItem) -> ActivityItem:
+    """Unpushed commits are informational."""
+    if item.metadata.get("sensor_type") == "workspace" and item.metadata.get("unpushed"):
+        return item.model_copy(update={"urgency": Urgency.LOW, "disposition": Disposition.NOTIFY})
+    return item
+
+
+def _workspace_debug_artifacts(item: ActivityItem) -> ActivityItem:
+    """Debug artifacts left in code should be cleaned before shipping."""
+    if item.metadata.get("debug_artifacts") == "true":
+        return item.model_copy(update={"urgency": Urgency.NORMAL, "disposition": Disposition.NOTIFY})
+    return item
+
+
+def _workspace_preflight_failure(item: ActivityItem) -> ActivityItem:
+    """Preflight failures (lint/test) need fixing before pushing."""
+    if item.metadata.get("preflight_failure") == "true":
+        return item.model_copy(update={"urgency": Urgency.HIGH, "disposition": Disposition.NOTIFY})
+    return item
+
+
 # Rule registry — order matters.
 _RULES: list[TriageRule] = [
     _ci_failure_is_high_urgency,
@@ -219,4 +285,12 @@ _RULES: list[TriageRule] = [
     _project_issues_summary_is_low,
     _project_progress_is_low,
     _project_pr_stale,
+    _sla_pr_too_large,
+    _sla_pr_aging,
+    _sla_pr_needs_review,
+    _workspace_conflict_warning,
+    _workspace_divergence,
+    _workspace_unpushed,
+    _workspace_debug_artifacts,
+    _workspace_preflight_failure,
 ]

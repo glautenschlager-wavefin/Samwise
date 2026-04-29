@@ -26,6 +26,7 @@ from samwise.sensors.calendar import CalendarSensor
 from samwise.sensors.github import GitHubSensor
 from samwise.sensors.jira import JiraSensor
 from samwise.sensors.project import ProjectSensor
+from samwise.sensors.workspace import WorkspaceSensor
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ _github_sensor: GitHubSensor | None = None
 _jira_sensor: JiraSensor | None = None
 _calendar_sensor: CalendarSensor | None = None
 _project_sensor: ProjectSensor | None = None
+_workspace_sensor: WorkspaceSensor | None = None
 _notify_handler: NotifyHandler | None = None
 _defer_handler: DeferHandler | None = None
 _act_handler: ActHandler | None = None
@@ -49,12 +51,13 @@ _act_handler: ActHandler | None = None
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    global _pipeline, _github_sensor, _jira_sensor, _calendar_sensor, _project_sensor, _notify_handler, _defer_handler, _act_handler
+    global _pipeline, _github_sensor, _jira_sensor, _calendar_sensor, _project_sensor, _workspace_sensor, _notify_handler, _defer_handler, _act_handler
 
     _github_sensor = GitHubSensor(settings)
     _jira_sensor = JiraSensor(settings)
     _calendar_sensor = CalendarSensor(settings)
     _project_sensor = ProjectSensor(settings)
+    _workspace_sensor = WorkspaceSensor(settings)
 
     # Real handlers ---
     _notify_handler = NotifyHandler()
@@ -67,17 +70,18 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     dispatcher.register(Disposition.ACT, _act_handler.handle)
 
     _pipeline = Pipeline(
-        sensors=[_github_sensor, _jira_sensor, _calendar_sensor, _project_sensor],
+        sensors=[_github_sensor, _jira_sensor, _calendar_sensor, _project_sensor, _workspace_sensor],
         dispatcher=dispatcher,
     )
 
     token_path = settings.data_dir / "google_token.json"
     logger.info(
-        "Samwise starting — GitHub: %s, Jira: %s, Calendar: %s, Projects: %s",
+        "Samwise starting — GitHub: %s, Jira: %s, Calendar: %s, Projects: %s, Workspace: %s",
         "active" if settings.github_token else "disabled (no token)",
         "active" if settings.jira_base_url else "disabled (no base URL)",
         "active" if token_path.exists() else "disabled (run 'Samwise: Connect Google Calendar')",
         f"{len(settings.project_repos)} repos" if settings.project_repos else "disabled (no repos configured)",
+        f"{len(settings.workspace_roots)} root(s)" if settings.workspace_roots else "disabled (no workspace)",
     )
 
     await _pipeline.start(settings.poll_interval_seconds)
@@ -94,6 +98,8 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         await _calendar_sensor.close()
     if _project_sensor:
         await _project_sensor.close()
+    if _workspace_sensor:
+        await _workspace_sensor.close()
 
 
 app = FastAPI(title="Samwise", version="0.1.0", lifespan=lifespan)
@@ -346,6 +352,41 @@ async def update_project_issue(
     resp = await client.patch(f"/repos/{owner}/{repo}/issues/{number}", json=payload)
     resp.raise_for_status()
     return resp.json()
+
+
+# ---------- Event bus endpoint ----------
+
+
+class EventPayload(PydanticBaseModel):
+    type: str  # e.g. "git_push", "git_commit", "branch_switch", "task_complete"
+    workspace: str = ""
+    branch: str = ""
+    detail: str = ""
+
+
+# Maps event types to the sensor class names to trigger.
+_EVENT_SENSOR_MAP: dict[str, set[str]] = {
+    "git_push": {"workspacesensor", "githubsensor"},
+    "git_commit": {"workspacesensor"},
+    "branch_switch": {"workspacesensor"},
+    "task_complete": {"workspacesensor"},
+}
+
+
+@app.post("/api/events")
+async def ingest_event(event: EventPayload) -> dict[str, str]:
+    """Accept a VS Code event and trigger a targeted pipeline run."""
+    if not _pipeline:
+        raise HTTPException(status_code=503, detail="Pipeline not ready")
+
+    sensor_types = _EVENT_SENSOR_MAP.get(event.type)
+    if not sensor_types:
+        logger.info("Unknown event type %s — running full pipeline", event.type)
+        sensor_types = None
+
+    logger.info("Event received: %s (workspace=%s, branch=%s)", event.type, event.workspace, event.branch)
+    asyncio.create_task(_pipeline.run_once(sensor_types=sensor_types))
+    return {"status": "accepted", "event_type": event.type}
 
 
 # ---------- Google Calendar OAuth endpoints ----------

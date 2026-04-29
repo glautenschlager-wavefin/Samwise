@@ -59,6 +59,27 @@ export async function buildBackendEnv(
     env["SAMWISE_PROJECT_STALENESS_DAYS"] = String(stalenessThreshold);
   }
 
+  // --- PR SLA settings ---
+  const slaMapping: Array<[string, string]> = [
+    ["prSla.maxLines", "SAMWISE_PR_SLA_MAX_LINES"],
+    ["prSla.maxAgeDays", "SAMWISE_PR_SLA_MAX_AGE_DAYS"],
+    ["prSla.maxTurnsBeforeReview", "SAMWISE_PR_SLA_MAX_TURNS_BEFORE_REVIEW"],
+  ];
+  for (const [settingKey, envKey] of slaMapping) {
+    const value = cfg.get<number>(settingKey);
+    if (value !== undefined) {
+      env[envKey] = String(value);
+    }
+  }
+
+  // --- Workspace roots ---
+  const folders = vscode.workspace.workspaceFolders;
+  if (folders && folders.length > 0) {
+    env["SAMWISE_WORKSPACE_ROOTS"] = JSON.stringify(
+      folders.map((f) => f.uri.fsPath),
+    );
+  }
+
   return env;
 }
 

@@ -67,6 +67,10 @@
             "description": "Show side-project health dashboard and manage issues"
           },
           {
+            "name": "shipping",
+            "description": "Show code shipping readiness (SLA violations, workspace checks, CI)"
+          },
+          {
             "name": "help",
             "description": "List available commands"
           }
@@ -163,6 +167,21 @@
           "type": "number",
           "default": 5,
           "description": "Days without a push before a project is flagged as stale."
+        },
+        "samwise.prSla.maxLines": {
+          "type": "number",
+          "default": 600,
+          "description": "Maximum lines changed in a PR before flagging as too large."
+        },
+        "samwise.prSla.maxAgeDays": {
+          "type": "number",
+          "default": 7,
+          "description": "Maximum days a PR can stay open before flagging."
+        },
+        "samwise.prSla.maxTurnsBeforeReview": {
+          "type": "number",
+          "default": 2,
+          "description": "Maximum push cycles before a PR should receive its first review."
         }
       }
     }

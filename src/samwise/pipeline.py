@@ -36,11 +36,20 @@ class Pipeline:
         """Items that were deferred for later."""
         return list(self._deferred)
 
-    async def run_once(self) -> None:
-        """Execute one full sense→triage→dispatch cycle."""
-        # Sense: collect from all sensors
+    async def run_once(self, *, sensor_types: set[str] | None = None) -> None:
+        """Execute one full sense→triage→dispatch cycle.
+
+        If *sensor_types* is given, only poll sensors whose class name
+        (case-insensitive) is in the set.  Otherwise poll all sensors.
+        """
+        # Sense: collect from matching sensors
+        sensors = self._sensors
+        if sensor_types:
+            lower = {s.lower() for s in sensor_types}
+            sensors = [s for s in self._sensors if type(s).__name__.lower() in lower]
+
         raw_items: list[ActivityItem] = []
-        for sensor in self._sensors:
+        for sensor in sensors:
             try:
                 items = await sensor.poll()
                 raw_items.extend(items)

@@ -26,6 +26,9 @@ class GitHubSensor(Sensor):
             },
             timeout=15.0,
         )
+        self._sla_max_lines = settings.pr_sla_max_lines
+        self._sla_max_age_days = settings.pr_sla_max_age_days
+        self._sla_max_turns = settings.pr_sla_max_turns_before_review
 
     async def poll(self) -> list[ActivityItem]:
         if not self._settings.github_token:
@@ -126,6 +129,13 @@ class GitHubSensor(Sensor):
                         metadata={"repo": repo_full, "pr_number": str(pr_number)},
                     )
                 )
+
+            # PR SLA checks
+            sla_items = await self._check_pr_sla(
+                repo_full, pr_number, title, updated, reviews,
+                created_at=datetime.fromisoformat(pr["created_at"]),
+            )
+            items.extend(sla_items)
 
         return items
 
@@ -229,6 +239,96 @@ class GitHubSensor(Sensor):
                     title=title,
                     detail=f"{repo} — {reason}",
                     timestamp=updated,
+                )
+            )
+
+        return items
+
+    async def _check_pr_sla(
+        self,
+        repo: str,
+        pr_number: int,
+        title: str,
+        updated: datetime,
+        reviews: list[dict[str, str]],
+        *,
+        created_at: datetime,
+    ) -> list[ActivityItem]:
+        """Evaluate PR SLA thresholds and emit violations."""
+        items: list[ActivityItem] = []
+        now = datetime.now(UTC)
+
+        # --- Size check (additions + deletions) ---
+        try:
+            resp = await self._client.get(f"/repos/{repo}/pulls/{pr_number}")
+            resp.raise_for_status()
+            pr_detail = resp.json()
+            additions = pr_detail.get("additions", 0)
+            deletions = pr_detail.get("deletions", 0)
+            total_lines = additions + deletions
+            commits = pr_detail.get("commits", 0)
+        except httpx.HTTPError:
+            logger.warning("Failed to fetch PR detail for SLA check: %s #%d", repo, pr_number)
+            return items
+
+        if total_lines > self._sla_max_lines:
+            items.append(
+                ActivityItem(
+                    id=f"gh-sla-size-{repo}-{pr_number}",
+                    category=ActivityCategory.CODE_SHIPPING,
+                    icon="📏",
+                    title=f"PR #{pr_number} is too large ({total_lines} lines)",
+                    detail=f"{repo}: {title} — +{additions}/−{deletions}, target <{self._sla_max_lines}",
+                    timestamp=updated,
+                    metadata={
+                        "repo": repo,
+                        "pr_number": str(pr_number),
+                        "sla_violation": "size",
+                        "total_lines": str(total_lines),
+                    },
+                )
+            )
+
+        # --- Age check ---
+        age_days = (now - created_at).days
+        if age_days > self._sla_max_age_days:
+            items.append(
+                ActivityItem(
+                    id=f"gh-sla-age-{repo}-{pr_number}",
+                    category=ActivityCategory.CODE_SHIPPING,
+                    icon="⏳",
+                    title=f"PR #{pr_number} open for {age_days} days",
+                    detail=f"{repo}: {title} — target <{self._sla_max_age_days} days",
+                    timestamp=updated,
+                    metadata={
+                        "repo": repo,
+                        "pr_number": str(pr_number),
+                        "sla_violation": "age",
+                        "age_days": str(age_days),
+                    },
+                )
+            )
+
+        # --- Time to first review (measured in push cycles / commits) ---
+        has_review = any(
+            r["state"] in ("APPROVED", "CHANGES_REQUESTED", "COMMENTED")
+            for r in reviews
+        )
+        if not has_review and commits > self._sla_max_turns:
+            items.append(
+                ActivityItem(
+                    id=f"gh-sla-review-{repo}-{pr_number}",
+                    category=ActivityCategory.CODE_SHIPPING,
+                    icon="👁️",
+                    title=f"PR #{pr_number} has {commits} commits, no review yet",
+                    detail=f"{repo}: {title} — target first review within {self._sla_max_turns} pushes",
+                    timestamp=updated,
+                    metadata={
+                        "repo": repo,
+                        "pr_number": str(pr_number),
+                        "sla_violation": "review_wait",
+                        "commits": str(commits),
+                    },
                 )
             )
 

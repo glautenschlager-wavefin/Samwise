@@ -12,6 +12,8 @@ When the user asks about meetings or their calendar, look for items with categor
 
 When the user asks about their side projects, look for items with category "project" in the activity feed. You can also use the project tools to create, close, list, and label GitHub issues on tracked repos.
 
+When the user asks about shipping readiness, PRs, or code health, look for SLA violations (sla_violation metadata), workspace checks (sensor_type=workspace metadata), and CI failures in the activity feed. Flag items that need attention before code can ship.
+
 When the user asks you to create an issue, extract the repo (owner/name), title, and optional body/labels. Format your response to confirm what was created with the issue number and link.
 
 When the user asks you to close an issue, confirm the repo and issue number, then close it.
@@ -157,6 +159,7 @@ export function createChatHandler(client: BackendClient): vscode.ChatRequestHand
             "| `/calendar` | Show upcoming meetings (next 2h) |",
             "| `/status` | Show current activity status |",
             "| `/projects` | Show side-project health dashboard |",
+            "| `/shipping` | Show code shipping readiness |",
             "| `/break` | Toggle break reminder |",
             "| `/do` | Execute a task (e.g., `/do merge PR #85`) |",
             "| `/help` | Show this help message |",
@@ -202,6 +205,60 @@ export function createChatHandler(client: BackendClient): vscode.ChatRequestHand
             "Can't reach the backend. Check the Samwise Backend log for errors.",
           );
         }
+        break;
+      }
+      case "shipping": {
+        stream.progress("Checking shipping readiness...");
+        const live = await client.fetchActivity();
+        if (!live || live.length === 0) {
+          stream.markdown(
+            "Can't reach the backend. Check the Samwise Backend log for errors.",
+          );
+          break;
+        }
+
+        // SLA violations
+        const slaItems = live.filter(
+          (i) => i.category === "code-shipping" && (i as any).metadata?.sla_violation,
+        );
+        // Workspace checks
+        const wsItems = live.filter(
+          (i) => i.category === "code-shipping" && (i as any).metadata?.sensor_type === "workspace",
+        );
+        // CI failures
+        const ciItems = live.filter(
+          (i) => i.category === "code-shipping" && i.icon === "🔴",
+        );
+
+        const sections: string[] = ["## 🚢 Shipping Readiness", ""];
+
+        if (slaItems.length === 0 && wsItems.length === 0 && ciItems.length === 0) {
+          sections.push("All clear — no SLA violations, workspace issues, or CI failures. Ship it! 🎉");
+        } else {
+          if (ciItems.length > 0) {
+            sections.push("### 🔴 CI Failures");
+            for (const item of ciItems) {
+              sections.push(`- ${item.icon} **${item.title}** — ${item.detail}`);
+            }
+            sections.push("");
+          }
+          if (slaItems.length > 0) {
+            sections.push("### 📊 PR SLA Violations");
+            for (const item of slaItems) {
+              sections.push(`- ${item.icon} **${item.title}** — ${item.detail}`);
+            }
+            sections.push("");
+          }
+          if (wsItems.length > 0) {
+            sections.push("### 🔧 Workspace Checks");
+            for (const item of wsItems) {
+              sections.push(`- ${item.icon} **${item.title}** — ${item.detail}`);
+            }
+            sections.push("");
+          }
+        }
+
+        stream.markdown(sections.join("\n"));
         break;
       }
       case "do": {

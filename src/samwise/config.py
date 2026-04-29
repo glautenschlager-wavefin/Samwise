@@ -21,5 +21,9 @@ class Settings(BaseSettings):
     google_client_secret_file: str = ""
     project_repos: list[str] = []
     project_staleness_days: int = 5
+    pr_sla_max_lines: int = 600
+    pr_sla_max_age_days: int = 7
+    pr_sla_max_turns_before_review: int = 2
+    workspace_roots: list[str] = []
 
     model_config = {"env_prefix": "SAMWISE_", "env_file": ".env"}
