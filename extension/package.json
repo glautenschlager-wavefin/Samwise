@@ -182,6 +182,17 @@
           "type": "number",
           "default": 2,
           "description": "Maximum push cycles before a PR should receive its first review."
+        },
+        "samwise.notifications.level": {
+          "type": "string",
+          "enum": [
+            "off",
+            "errors-only",
+            "important",
+            "all"
+          ],
+          "default": "important",
+          "markdownDescription": "Controls Samwise toast notifications. `off` disables all toasts. `errors-only` shows only errors. `important` shows actionable warnings and errors. `all` shows every notification."
         }
       }
     }

@@ -11,8 +11,122 @@ let statusBarItem: vscode.StatusBarItem;
 let refreshInterval: ReturnType<typeof setInterval> | undefined;
 let backendManager: BackendManager | undefined;
 
+type NotificationLevel = "off" | "errors-only" | "important" | "all";
+
+const notificationLastShownAt = new Map<string, number>();
+
+function getNotificationLevel(): NotificationLevel {
+  return vscode.workspace
+    .getConfiguration("samwise")
+    .get<NotificationLevel>("notifications.level", "important");
+}
+
+function shouldShowToast(
+  level: NotificationLevel,
+  severity: "info" | "warning" | "error",
+  important = false,
+): boolean {
+  if (severity === "error") {
+    return level !== "off";
+  }
+
+  if (severity === "warning") {
+    if (level === "all") {
+      return true;
+    }
+    if (level === "important" && important) {
+      return true;
+    }
+    return false;
+  }
+
+  if (level === "all") {
+    return true;
+  }
+  if (level === "important" && important) {
+    return true;
+  }
+  return false;
+}
+
+function shouldRateLimit(key: string, throttleMs: number): boolean {
+  const now = Date.now();
+  const last = notificationLastShownAt.get(key);
+  if (typeof last === "number" && now - last < throttleMs) {
+    return true;
+  }
+  notificationLastShownAt.set(key, now);
+  return false;
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   const client = new BackendClient();
+  const notificationChannel = vscode.window.createOutputChannel("Samwise");
+  context.subscriptions.push(notificationChannel);
+
+  const logNotification = (severity: "info" | "warning" | "error", message: string): void => {
+    notificationChannel.appendLine(`${new Date().toISOString()} [${severity.toUpperCase()}] ${message}`);
+  };
+
+  const notifyInfo = (
+    message: string,
+    options?: { important?: boolean; statusBarMs?: number; throttleKey?: string; throttleMs?: number },
+  ): void => {
+    const throttleKey = options?.throttleKey;
+    const throttleMs = options?.throttleMs ?? 60_000;
+    if (throttleKey && shouldRateLimit(throttleKey, throttleMs)) {
+      return;
+    }
+
+    logNotification("info", message);
+    if (options?.statusBarMs) {
+      vscode.window.setStatusBarMessage(`Samwise: ${message}`, options.statusBarMs);
+    }
+
+    if (shouldShowToast(getNotificationLevel(), "info", options?.important ?? false)) {
+      void vscode.window.showInformationMessage(`Samwise: ${message}`);
+    }
+  };
+
+  const notifyWarning = (
+    message: string,
+    options?: { important?: boolean; statusBarMs?: number; throttleKey?: string; throttleMs?: number },
+  ): void => {
+    const throttleKey = options?.throttleKey;
+    const throttleMs = options?.throttleMs ?? 60_000;
+    if (throttleKey && shouldRateLimit(throttleKey, throttleMs)) {
+      return;
+    }
+
+    logNotification("warning", message);
+    if (options?.statusBarMs) {
+      vscode.window.setStatusBarMessage(`Samwise: ${message}`, options.statusBarMs);
+    }
+
+    if (shouldShowToast(getNotificationLevel(), "warning", options?.important ?? false)) {
+      void vscode.window.showWarningMessage(`Samwise: ${message}`);
+    }
+  };
+
+  const notifyError = (
+    message: string,
+    options?: { statusBarMs?: number; throttleKey?: string; throttleMs?: number },
+  ): void => {
+    const throttleKey = options?.throttleKey;
+    const throttleMs = options?.throttleMs ?? 60_000;
+    if (throttleKey && shouldRateLimit(throttleKey, throttleMs)) {
+      return;
+    }
+
+    logNotification("error", message);
+    if (options?.statusBarMs) {
+      vscode.window.setStatusBarMessage(`Samwise: ${message}`, options.statusBarMs);
+    }
+
+    if (shouldShowToast(getNotificationLevel(), "error", true)) {
+      void vscode.window.showErrorMessage(`Samwise: ${message}`);
+    }
+  };
 
   // --- Sidebar ---
   const sidebarProvider = new SidebarProvider(context.extensionUri, client);
@@ -50,7 +164,11 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("samwise.refreshFeed", () => {
       void sidebarProvider.refresh();
-      void vscode.window.showInformationMessage("Samwise: Activity feed refreshed");
+      notifyInfo("Activity feed refreshed", {
+        statusBarMs: 2_500,
+        throttleKey: "refresh-feed",
+        throttleMs: 5_000,
+      });
     }),
   );
 
@@ -58,9 +176,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("samwise.showSummary", async () => {
       const live = await client.fetchStatus();
       if (live) {
-        void vscode.window.showInformationMessage(live.text.replace("$(rocket) ", ""));
+        notifyInfo(live.text.replace("$(rocket) ", ""), { important: true, statusBarMs: 6_000 });
       } else {
-        void vscode.window.showInformationMessage("Samwise backend is not running.");
+        notifyWarning("Backend is not running.", { important: true, statusBarMs: 6_000 });
       }
     }),
   );
@@ -75,7 +193,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("samwise.setGithubToken", async () => {
       const stored = await setGithubToken(context.secrets);
       if (stored) {
-        void vscode.window.showInformationMessage("GitHub token saved. Restart Samwise to apply.");
+        notifyInfo("GitHub token saved. Restart Samwise to apply.", {
+          important: true,
+          statusBarMs: 8_000,
+        });
       }
     }),
   );
@@ -84,7 +205,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("samwise.setJiraToken", async () => {
       const stored = await setJiraToken(context.secrets);
       if (stored) {
-        void vscode.window.showInformationMessage("Jira API token saved. Restart Samwise to apply.");
+        notifyInfo("Jira API token saved. Restart Samwise to apply.", {
+          important: true,
+          statusBarMs: 8_000,
+        });
       }
     }),
   );
@@ -94,33 +218,36 @@ export function activate(context: vscode.ExtensionContext): void {
       try {
         const authUrl = await client.startGoogleAuth();
         if (!authUrl) {
-          void vscode.window.showErrorMessage("Samwise: Failed to start Google auth.");
+          notifyError("Failed to start Google auth.", { statusBarMs: 8_000 });
           return;
         }
 
         await vscode.env.openExternal(vscode.Uri.parse(authUrl));
-        void vscode.window.showInformationMessage(
-          "Samwise: Complete Google sign-in in your browser…",
-        );
+        notifyInfo("Complete Google sign-in in your browser...", {
+          important: true,
+          statusBarMs: 10_000,
+        });
 
         // Poll for completion (up to 2 minutes, every 3 seconds)
         for (let i = 0; i < 40; i++) {
           await new Promise((r) => setTimeout(r, 3_000));
           const done = await client.isGoogleAuthenticated();
           if (done) {
-            void vscode.window.showInformationMessage(
-              "Samwise: Google Calendar connected! Events will appear on the next poll cycle.",
-            );
+            notifyInfo("Google Calendar connected. Events will appear on the next poll cycle.", {
+              important: true,
+              statusBarMs: 8_000,
+            });
             return;
           }
         }
 
-        void vscode.window.showWarningMessage(
-          "Samwise: Google auth timed out. Try running the command again.",
-        );
+        notifyWarning("Google auth timed out. Try running the command again.", {
+          important: true,
+          statusBarMs: 8_000,
+        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        void vscode.window.showErrorMessage(`Samwise: Google auth failed — ${msg}`);
+        notifyError(`Google auth failed: ${msg}`, { statusBarMs: 10_000 });
       }
     }),
   );
@@ -150,13 +277,24 @@ export function activate(context: vscode.ExtensionContext): void {
       void updateStatusBar();
 
       if (item.urgency === "high") {
-        void vscode.window
-          .showWarningMessage(`Samwise: ${item.title}`, "Open Feed")
-          .then((choice) => {
-            if (choice === "Open Feed") {
-              void vscode.commands.executeCommand("samwise.activityFeed.focus");
-            }
-          });
+        const message = item.title;
+        logNotification("warning", `High urgency event: ${message}`);
+
+        if (shouldRateLimit(`high-urgency:${message}`, 60_000)) {
+          return;
+        }
+
+        vscode.window.setStatusBarMessage(`Samwise: ${message}`, 8_000);
+
+        if (shouldShowToast(getNotificationLevel(), "warning", true)) {
+          void vscode.window
+            .showWarningMessage(`Samwise: ${message}`, "Open Feed")
+            .then((choice) => {
+              if (choice === "Open Feed") {
+                void vscode.commands.executeCommand("samwise.activityFeed.focus");
+              }
+            });
+        }
       }
     });
   };
@@ -192,28 +330,35 @@ export function activate(context: vscode.ExtensionContext): void {
       void updateStatusBar();
       connectSse();
 
-      void vscode.window.showInformationMessage(
-        `Samwise backend running on port ${backendManager.port}`,
-      );
+      notifyInfo(`Backend running on port ${backendManager.port}`, {
+        statusBarMs: 5_000,
+        throttleKey: "backend-started",
+        throttleMs: 10_000,
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       backendManager?.outputChannel.appendLine(`Startup failed: ${msg}`);
 
       // Fall back to trying an already-running backend
       statusBarItem.text = "$(warning) Samwise: backend failed";
-      void vscode.window
-        .showWarningMessage(
-          `Samwise backend failed to start: ${msg}`,
-          "Show Log",
-          "Retry",
-        )
-        .then((choice) => {
-          if (choice === "Show Log") {
-            backendManager?.outputChannel.show();
-          } else if (choice === "Retry") {
-            void startBackend();
-          }
-        });
+      logNotification("warning", `Backend failed to start: ${msg}`);
+      vscode.window.setStatusBarMessage("Samwise: backend failed to start. See logs for details.", 10_000);
+
+      if (shouldShowToast(getNotificationLevel(), "warning", true)) {
+        void vscode.window
+          .showWarningMessage(
+            `Samwise backend failed to start: ${msg}`,
+            "Show Log",
+            "Retry",
+          )
+          .then((choice) => {
+            if (choice === "Show Log") {
+              backendManager?.outputChannel.show();
+            } else if (choice === "Retry") {
+              void startBackend();
+            }
+          });
+      }
 
       // Still try connecting in case user starts it manually
       void updateStatusBar();

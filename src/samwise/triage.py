@@ -258,9 +258,18 @@ def _workspace_debug_artifacts(item: ActivityItem) -> ActivityItem:
 
 
 def _workspace_preflight_failure(item: ActivityItem) -> ActivityItem:
-    """Preflight failures (lint/test) need fixing before pushing."""
+    """Preflight failures (lint/test) need fixing before pushing.
+
+    Lint failures are routed to ACT so Samwise can auto-fix them; other
+    checks (e.g. tests) still surface as a NOTIFY for the user to handle.
+    """
     if item.metadata.get("preflight_failure") == "true":
-        return item.model_copy(update={"urgency": Urgency.HIGH, "disposition": Disposition.NOTIFY})
+        disposition = (
+            Disposition.ACT
+            if item.metadata.get("check") == "lint"
+            else Disposition.NOTIFY
+        )
+        return item.model_copy(update={"urgency": Urgency.HIGH, "disposition": disposition})
     return item
 
 

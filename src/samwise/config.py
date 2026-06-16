@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     poll_interval_seconds: int = 120
     data_dir: Path = _DEFAULT_DATA_DIR
     auto_merge: bool = False
+    auto_fix_lint: bool = True
     google_client_secret_file: str = ""
     project_repos: list[str] = []
     project_staleness_days: int = 5
